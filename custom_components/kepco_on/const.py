@@ -26,6 +26,20 @@ PLATFORMS = (Platform.SENSOR,)
 CONF_USERNAME = "username"
 CONF_SAVE_PASSWORD = "save_password"
 CONF_SELECTED_CUSTOMERS = "selected_customers"
+CONF_ACCOUNT_UID_HASH = "account_uid_hash"
+CONF_CUSTOMERS = "customers"
+CONF_DISPLAY_NAME = "display_name"
+CONF_SESSION_HANDOFF = "session_handoff"
+SENSITIVE_CONFIG_DATA_KEYS = frozenset({CONF_PASSWORD, CONF_SESSION_HANDOFF})
+
+DATA_STABLE_KEY = "stable_key"
+DATA_APARTMENT_NAME = "apartment_name"
+DATA_DONG = "dong"
+DATA_HO = "ho"
+DATA_CONTRACT_METHOD = "contract_method"
+DATA_IS_SUPPORTED = "is_supported"
+DATA_CUSTOMER_NUMBER = "customer_number"
+DATA_HOUSE_CONTRACT_NUMBER = "house_contract_number"
 
 OPT_POLLING_INTERVAL_HOURS = "polling_interval_hours"
 OPT_ENABLE_DETAILED_SENSORS = "enable_detailed_sensors"
@@ -39,10 +53,22 @@ PERSISTED_COOKIE_ALLOWLIST: frozenset[str] = frozenset()
 __all__ = [
     "BASE_URL",
     "CANDIDATE_COOKIE_NAMES",
+    "CONF_ACCOUNT_UID_HASH",
+    "CONF_CUSTOMERS",
+    "CONF_DISPLAY_NAME",
     "CONF_PASSWORD",
     "CONF_SAVE_PASSWORD",
     "CONF_SELECTED_CUSTOMERS",
+    "CONF_SESSION_HANDOFF",
     "CONF_USERNAME",
+    "DATA_APARTMENT_NAME",
+    "DATA_CONTRACT_METHOD",
+    "DATA_CUSTOMER_NUMBER",
+    "DATA_DONG",
+    "DATA_HO",
+    "DATA_HOUSE_CONTRACT_NUMBER",
+    "DATA_IS_SUPPORTED",
+    "DATA_STABLE_KEY",
     "DEFAULT_POLLING_INTERVAL_HOURS",
     "DOMAIN",
     "ENDPOINT_APT_BILL_DETAIL",
@@ -63,5 +89,6 @@ __all__ = [
     "PERSISTED_COOKIE_ALLOWLIST",
     "PLATFORMS",
     "POLLING_INTERVAL_HOURS",
+    "SENSITIVE_CONFIG_DATA_KEYS",
     "VERSION",
 ]

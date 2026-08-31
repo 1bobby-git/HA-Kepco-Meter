@@ -1,0 +1,95 @@
+{
+  "title": "한전ON",
+  "config": {
+    "step": {
+      "user": {
+        "title": "한전ON 연결",
+        "description": "한전ON에 로그인합니다. 비밀번호를 저장하면 Home Assistant 저장소와 백업은 암호화된 비밀 금고가 아니라는 점을 기억하세요.",
+        "data": {
+          "username": "아이디",
+          "password": "비밀번호",
+          "save_password": "자동 재인증을 위해 비밀번호 저장",
+          "display_name": "표시 이름"
+        },
+        "data_description": {
+          "username": "한전ON 계정 아이디입니다.",
+          "password": "한전ON 비밀번호입니다.",
+          "save_password": "다시 묻지 않고 재인증할 수 있도록 설정 항목에 비밀번호를 저장합니다.",
+          "display_name": "이 Home Assistant 항목에 사용할 선택 입력 이름입니다."
+        }
+      },
+      "customer": {
+        "title": "고객 선택",
+        "description": "모니터링할 아파트 계약을 하나 이상 선택하세요.",
+        "data": {
+          "selected_customers": "고객"
+        },
+        "data_description": {
+          "selected_customers": "개인정보 보호를 위해 아파트, 동, 호만 표시합니다."
+        }
+      },
+      "reauth_confirm": {
+        "title": "한전ON 재인증",
+        "description": "이 한전ON 계정의 비밀번호를 입력하세요.",
+        "data": {
+          "password": "비밀번호"
+        }
+      },
+      "reconfigure": {
+        "title": "고객 선택",
+        "description": "이 항목이 모니터링할 저장된 한전ON 고객을 변경합니다.",
+        "data": {
+          "selected_customers": "고객"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "인증에 실패했습니다.",
+      "cannot_connect": "한전ON에 연결할 수 없습니다.",
+      "rate_limited": "한전ON 요청이 제한되었습니다. 나중에 다시 시도하세요.",
+      "unsupported_account": "지원하지 않는 한전ON 계정 유형입니다.",
+      "no_customers": "지원되는 아파트 고객을 찾지 못했습니다.",
+      "mfa_required": "이 계정은 아직 지원하지 않는 대화형 로그인 확인이 필요합니다.",
+      "protocol_changed": "한전ON이 예상과 다른 응답을 반환했습니다.",
+      "invalid_selection": "올바른 고객을 하나 이상 선택하세요.",
+      "invalid_co2_factor": "CO2 계수는 0보다 크고 10 이하여야 합니다.",
+      "invalid_history_months": "이력 개월 수는 1부터 24 사이여야 합니다.",
+      "unknown": "예상하지 못한 오류입니다."
+    },
+    "abort": {
+      "already_configured": "이 한전ON 계정은 이미 설정되어 있습니다.",
+      "reauth_successful": "재인증이 완료되었습니다.",
+      "reconfigure_successful": "고객 선택이 변경되었습니다."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "한전ON 옵션",
+        "description": "조회 주기, 센서, CO2 추정, 고객 선택을 조정합니다.",
+        "data": {
+          "polling_interval_hours": "조회 주기",
+          "selected_customers": "고객",
+          "enable_detailed_sensors": "상세 센서 사용",
+          "enable_co2_estimate": "CO2 추정 사용",
+          "co2_factor_kg_per_kwh": "CO2 계수 (kg/kWh)",
+          "history_months": "이력 개월 수"
+        },
+        "data_description": {
+          "polling_interval_hours": "한전ON 업데이트 사이의 시간입니다.",
+          "selected_customers": "이 항목이 모니터링할 고객입니다.",
+          "enable_detailed_sensors": "추가 진단 센서를 생성합니다.",
+          "enable_co2_estimate": "전력 사용량으로 CO2 배출량을 추정합니다.",
+          "co2_factor_kg_per_kwh": "10 이하의 양수 소수 계수입니다.",
+          "history_months": "요청할 이력 개월 수입니다."
+        }
+      }
+    },
+    "error": {
+      "invalid_selection": "올바른 고객을 하나 이상 선택하세요.",
+      "invalid_co2_factor": "CO2 계수는 0보다 크고 10 이하여야 합니다.",
+      "invalid_history_months": "이력 개월 수는 1부터 24 사이여야 합니다.",
+      "unknown": "예상하지 못한 오류입니다."
+    }
+  }
+}

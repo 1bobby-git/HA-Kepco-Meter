@@ -1,0 +1,95 @@
+{
+  "title": "KEPCO ON",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect KEPCO ON",
+        "description": "Sign in to KEPCO ON. If you save the password, remember Home Assistant storage and backups are not encrypted secret vaults.",
+        "data": {
+          "username": "Username",
+          "password": "Password",
+          "save_password": "Save password for automatic reauthentication",
+          "display_name": "Display name"
+        },
+        "data_description": {
+          "username": "Your KEPCO ON account ID.",
+          "password": "Your KEPCO ON password.",
+          "save_password": "Stores the password in the config entry so the integration can reauthenticate without asking again.",
+          "display_name": "Optional name for this Home Assistant entry."
+        }
+      },
+      "customer": {
+        "title": "Select customers",
+        "description": "Choose one or more apartment contracts to monitor.",
+        "data": {
+          "selected_customers": "Customers"
+        },
+        "data_description": {
+          "selected_customers": "Only apartment, dong, and ho are shown here for privacy."
+        }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate KEPCO ON",
+        "description": "Enter the password for this KEPCO ON account.",
+        "data": {
+          "password": "Password"
+        }
+      },
+      "reconfigure": {
+        "title": "Select customers",
+        "description": "Update which stored KEPCO ON customers this entry monitors.",
+        "data": {
+          "selected_customers": "Customers"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Authentication failed.",
+      "cannot_connect": "Could not connect to KEPCO ON.",
+      "rate_limited": "KEPCO ON rate-limited the request. Try again later.",
+      "unsupported_account": "This KEPCO ON account type is not supported.",
+      "no_customers": "No supported apartment customers were found.",
+      "mfa_required": "This account requires an interactive sign-in challenge that is not supported yet.",
+      "protocol_changed": "KEPCO ON returned an unexpected response.",
+      "invalid_selection": "Select at least one valid customer.",
+      "invalid_co2_factor": "CO2 factor must be greater than 0 and no more than 10.",
+      "invalid_history_months": "History months must be from 1 to 24.",
+      "unknown": "Unexpected error."
+    },
+    "abort": {
+      "already_configured": "This KEPCO ON account is already configured.",
+      "reauth_successful": "Reauthentication was successful.",
+      "reconfigure_successful": "Customer selection was updated."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "KEPCO ON options",
+        "description": "Adjust polling, sensors, CO2 estimate, and customer selection.",
+        "data": {
+          "polling_interval_hours": "Polling interval",
+          "selected_customers": "Customers",
+          "enable_detailed_sensors": "Enable detailed sensors",
+          "enable_co2_estimate": "Enable CO2 estimate",
+          "co2_factor_kg_per_kwh": "CO2 factor (kg/kWh)",
+          "history_months": "History months"
+        },
+        "data_description": {
+          "polling_interval_hours": "Hours between KEPCO ON updates.",
+          "selected_customers": "Customers monitored by this entry.",
+          "enable_detailed_sensors": "Create additional diagnostic sensors.",
+          "enable_co2_estimate": "Estimate CO2 emissions from electricity use.",
+          "co2_factor_kg_per_kwh": "Positive decimal factor up to 10.",
+          "history_months": "Number of months of history to request."
+        }
+      }
+    },
+    "error": {
+      "invalid_selection": "Select at least one valid customer.",
+      "invalid_co2_factor": "CO2 factor must be greater than 0 and no more than 10.",
+      "invalid_history_months": "History months must be from 1 to 24.",
+      "unknown": "Unexpected error."
+    }
+  }
+}
