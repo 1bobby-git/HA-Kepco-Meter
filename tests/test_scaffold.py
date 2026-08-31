@@ -19,8 +19,15 @@ from custom_components.kepco_on.exceptions import (
     KepcoOnUnsupportedAccount,
 )
 from homeassistant.const import Platform
+from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _test_requirements() -> dict[str, Requirement]:
+    lines = (ROOT / "requirements_test.txt").read_text(encoding="utf-8").splitlines()
+    requirements = [Requirement(line) for line in lines if line and not line.startswith("#")]
+    return {requirement.name: requirement for requirement in requirements}
 
 
 def test_manifest_matches_integration_contract() -> None:
@@ -48,6 +55,23 @@ def test_hacs_metadata_uses_supported_minimum_keys() -> None:
         "content_in_root": False,
         "homeassistant": "2026.8.3",
     }
+
+
+def test_test_requirements_keep_windows_default_pytest_collectable() -> None:
+    requirements = _test_requirements()
+
+    assert str(requirements["homeassistant"].specifier) == "==2026.8.3"
+    assert requirements["homeassistant"].marker is None
+
+    ha_plugin = requirements["pytest-homeassistant-custom-component"]
+    assert str(ha_plugin.specifier) == "==0.13.357"
+    assert ha_plugin.marker is not None
+    assert not ha_plugin.marker.evaluate({"platform_system": "Windows"})
+    assert ha_plugin.marker.evaluate({"platform_system": "Linux"})
+
+    pytest_asyncio = requirements["pytest-asyncio"]
+    assert str(pytest_asyncio.specifier) == "==1.4.0"
+    assert pytest_asyncio.marker is None
 
 
 def test_gitignore_blocks_capture_and_secret_artifacts() -> None:
