@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import UTC, datetime
 from hashlib import sha256
 from typing import Protocol
@@ -142,11 +143,13 @@ class KepcoOnAuth:
         if payload.get("loginChk") != "Y":
             raise KepcoOnSessionExpired("KEPCO ON SSO session expired")
         refresh_token = payload.get("refreshToken")
-        return (
-            refresh_token
-            if isinstance(refresh_token, str) and refresh_token
-            else session.refresh_token
-        )
+        if not isinstance(refresh_token, str) or not refresh_token:
+            return session.refresh_token
+        if refresh_token != session.refresh_token:
+            await self._save_current_session(
+                replace(session, refresh_token=refresh_token, updated_at=self._clock())
+            )
+        return refresh_token
 
     async def async_protected_request(
         self,

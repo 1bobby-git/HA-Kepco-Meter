@@ -175,7 +175,7 @@ class KepcoOnTransport:
         raise KepcoOnConnectionError("Could not reach KEPCO ON")
 
     async def _handle_response(self, response: ClientResponse, clock: ClockCallback) -> JsonObject:
-        if response.url.host != ONLINE_HOST:
+        if response.url.scheme != "https" or response.url.host != ONLINE_HOST:
             raise _safe_protocol_error("response host changed")
 
         if response.status in TRANSIENT_STATUSES:
@@ -203,10 +203,15 @@ class KepcoOnTransport:
         stripped = body.lstrip()
         if not _is_json_content_type(content_type) and not stripped.startswith((b"{", b"[")):
             raise _safe_protocol_error("response is not JSON")
+        parsed: object | None
         try:
             parsed = json.loads(body.decode(response.charset or "utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as err:
-            raise _safe_protocol_error("response JSON is invalid") from err
+        except UnicodeDecodeError:
+            parsed = None
+        except json.JSONDecodeError:
+            parsed = None
+        if parsed is None:
+            raise _safe_protocol_error("response JSON is invalid")
         if not isinstance(parsed, dict):
             raise _safe_protocol_error("response JSON root is not an object")
         return cast("JsonObject", parsed)

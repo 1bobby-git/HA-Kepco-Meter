@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import traceback
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from email.utils import format_datetime
@@ -27,6 +28,7 @@ REFERER = "https://online.kepco.co.kr/MYM001D00"
 ORIGIN = "https://online.kepco.co.kr/"
 REFRESH_SECRET = "REFRESH_SECRET_CANARY"
 PASSWORD_SECRET = "PASSWORD_SECRET_CANARY"
+TOKEN_SECRET = "TOKEN_SECRET_CANARY"
 SLEEP_CALLS: list[float] = []
 
 
@@ -116,6 +118,23 @@ async def test_transport_accepts_json_content_type_with_charset() -> None:
 
 
 @pytest.mark.asyncio
+async def test_transport_accepts_safely_parseable_json_under_non_json_content_type() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(text='{"result": true}', content_type="text/plain"),
+    )
+
+    result = await with_transport(
+        lambda transport: transport.request_json("/sessionCheck", {}), server
+    )
+
+    assert result == {"result": True}
+
+
+@pytest.mark.asyncio
 async def test_transport_treats_html_login_markup_as_expired_without_secret_leak() -> None:
     server = ResponsesMockServer()
     server.add(
@@ -149,6 +168,33 @@ async def test_transport_rejects_non_json_200_response() -> None:
 
     with pytest.raises(KepcoOnProtocolError):
         await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+
+@pytest.mark.asyncio
+async def test_transport_invalid_json_does_not_chain_secret_bearing_document() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(
+            text=f'{{"token": "{TOKEN_SECRET}",',
+            content_type="application/json",
+        ),
+    )
+
+    with pytest.raises(KepcoOnProtocolError) as raised:
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+    error = raised.value
+    rendered = "".join(traceback.format_exception(error))
+    assert TOKEN_SECRET not in str(error)
+    assert TOKEN_SECRET not in repr(error)
+    assert TOKEN_SECRET not in repr(error.__cause__)
+    assert TOKEN_SECRET not in repr(error.__context__)
+    assert TOKEN_SECRET not in rendered
+    assert error.__cause__ is None
+    assert error.__context__ is None
 
 
 @pytest.mark.asyncio
@@ -195,6 +241,23 @@ async def test_transport_rejects_final_host_mismatch_after_redirect() -> None:
         "get",
         response=json_response({"result": True}),
     )
+
+    with pytest.raises(KepcoOnProtocolError):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_final_http_scheme_even_when_host_matches() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(
+            status=302, headers={"Location": "http://online.kepco.co.kr/sessionCheck"}
+        ),
+    )
+    server.add(HOST, "/sessionCheck", "get", response=json_response({"result": True}))
 
     with pytest.raises(KepcoOnProtocolError):
         await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
