@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -183,6 +184,19 @@ def _map_error(err: Exception) -> str:
     return "unknown"
 
 
+def _stored_customers(entry_data: Mapping[str, Any]) -> tuple[KepcoCustomer, ...] | None:
+    try:
+        customers = tuple(
+            _deserialize_customer(cast("Mapping[str, Any]", payload))
+            for payload in entry_data.get(CONF_CUSTOMERS, [])
+        )
+    except KeyError, TypeError, ValueError:
+        return None
+    if not customers:
+        return None
+    return customers
+
+
 def _valid_selected(selected: object, available: set[str]) -> list[str] | None:
     if not isinstance(selected, list) or not selected:
         return None
@@ -204,6 +218,15 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._pending: PendingConfig | None = None
+
+    @callback
+    def async_remove(self) -> None:
+        """Close any pending dedicated login session when the flow is abandoned."""
+        pending = self._pending
+        self._pending = None
+        if pending is not None:
+            asyncio.get_running_loop().create_task(_close_session(pending.client_session))
+        super().async_remove()
 
     @staticmethod
     @callback
@@ -392,10 +415,9 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Update customer selection for an existing entry."""
         entry = self._get_reconfigure_entry()
-        customers = tuple(
-            _deserialize_customer(cast("Mapping[str, Any]", payload))
-            for payload in entry.data.get(CONF_CUSTOMERS, [])
-        )
+        customers = _stored_customers(entry.data)
+        if customers is None:
+            return self.async_abort(reason="no_customers")
         current = [str(value) for value in entry.data.get(CONF_SELECTED_CUSTOMERS, [])]
         if user_input is None:
             return self.async_show_form(
@@ -429,10 +451,7 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Manage integration options."""
-        customers = tuple(
-            _deserialize_customer(cast("Mapping[str, Any]", payload))
-            for payload in self._config_entry.data.get(CONF_CUSTOMERS, [])
-        )
+        customers = _stored_customers(self._config_entry.data) or ()
         if user_input is None:
             return self.async_show_form(step_id="init", data_schema=self._schema(customers))
 

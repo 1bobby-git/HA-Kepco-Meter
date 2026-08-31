@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -144,7 +145,7 @@ class FakeSession:
 
     def __init__(self) -> None:
         self.cookie_jar = CookieJar()
-        self.closed = False
+        self.closed: bool = False
 
     async def close(self) -> None:
         self.closed = True
@@ -444,6 +445,24 @@ async def test_multiple_customers_and_empty_selection_recovery(
     assert result["type"] == "create_entry"
     assert result["data"][CONF_SELECTED_CUSTOMERS] == ["key-1", "key-2"]
     assert patched_flow_dependencies[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_flow_abandonment_closes_pending_login_session(
+    patched_flow_dependencies: list[FakeSession],
+) -> None:
+    flow = make_flow()
+    await reach_customer_step(flow)
+    assert not bool(patched_flow_dependencies[0].closed)
+    assert cast("Any", flow)._pending is not None
+
+    remove_flow = cast("Any", flow.async_remove)
+    remove_flow()
+    remove_flow()
+    await asyncio.sleep(0)
+
+    assert bool(patched_flow_dependencies[0].closed)
+    assert cast("Any", flow)._pending is None
 
 
 @pytest.mark.asyncio
@@ -809,6 +828,25 @@ async def test_reconfigure_rejects_empty_or_unknown_selection() -> None:
         assert result["errors"] == {"base": "invalid_selection"}
 
 
+@pytest.mark.asyncio
+async def test_reconfigure_aborts_when_stored_customers_are_empty_or_invalid() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    for stored_customers in ([], [{"stable_key": "key-1"}]):
+        entry = make_entry()
+        entry.data[CONF_CUSTOMERS] = stored_customers
+        flow = KepcoOnConfigFlow()
+        attach_fake_hass(flow)
+        flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+        flow.flow_id = "flow-1"
+        cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+        result = await flow.async_step_reconfigure()
+
+        assert result["type"] == "abort"
+        assert result["reason"] == "no_customers"
+
+
 def test_translation_files_have_required_key_parity() -> None:
     required_errors = {
         "invalid_auth",
@@ -823,7 +861,12 @@ def test_translation_files_have_required_key_parity() -> None:
         "invalid_history_months",
         "unknown",
     }
-    required_aborts = {"already_configured", "reauth_successful", "reconfigure_successful"}
+    required_aborts = {
+        "already_configured",
+        "no_customers",
+        "reauth_successful",
+        "reconfigure_successful",
+    }
     files = [
         ROOT / "custom_components/kepco_on/strings.json",
         ROOT / "custom_components/kepco_on/translations/en.json",

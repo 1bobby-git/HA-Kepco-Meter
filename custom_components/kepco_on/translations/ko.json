@@ -58,6 +58,7 @@
     },
     "abort": {
       "already_configured": "이 한전ON 계정은 이미 설정되어 있습니다.",
+      "no_customers": "저장된 한전ON 고객을 사용할 수 없습니다. 항목을 새로 고친 뒤 다시 설정하세요.",
       "reauth_successful": "재인증이 완료되었습니다.",
       "reconfigure_successful": "고객 선택이 변경되었습니다."
     }
