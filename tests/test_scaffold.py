@@ -46,7 +46,7 @@ def test_hacs_metadata_uses_supported_minimum_keys() -> None:
     assert hacs == {
         "name": "한전ON (KEPCO ON)",
         "content_in_root": False,
-        "homeassistant": "2026.8.0",
+        "homeassistant": "2026.8.3",
     }
 
 
