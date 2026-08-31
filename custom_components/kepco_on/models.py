@@ -18,6 +18,7 @@ class KepcoCookie:
     path: str = "/"
     secure: bool = True
     expires: int | None = None
+    host_only: bool = True
 
 
 @dataclass(frozen=True, slots=True)

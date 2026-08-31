@@ -79,20 +79,25 @@ def add_cookie(
     *,
     name: str,
     value: str,
-    domain: str = "online.kepco.co.kr",
+    domain: str | None = "online.kepco.co.kr",
     path: str = "/",
     secure: bool = True,
     expires: datetime | None = None,
+    max_age: int | None = None,
 ) -> None:
     cookies = SimpleCookie()
     cookies[name] = value
-    cookies[name]["domain"] = domain
+    if domain is not None:
+        cookies[name]["domain"] = domain
     cookies[name]["path"] = path
     if secure:
         cookies[name]["secure"] = True
     if expires is not None:
         cookies[name]["expires"] = expires.strftime("%a, %d %b %Y %H:%M:%S GMT")
-    jar.update_cookies(cookies, URL(f"https://{domain.removeprefix('.')}/"))
+    if max_age is not None:
+        cookies[name]["max-age"] = str(max_age)
+    host = (domain or "online.kepco.co.kr").removeprefix(".")
+    jar.update_cookies(cookies, URL(f"https://{host}/"))
 
 
 def assert_canaries_absent(text: str) -> None:
@@ -133,7 +138,9 @@ async def test_store_save_load_round_trip_uses_versioned_payload(
             ),
         )
     )
-    store = KepcoOnSessionStore(cast("HomeAssistant", object()), "entry-1")
+    store = KepcoOnSessionStore(
+        cast("HomeAssistant", object()), "entry-1", allowed_cookie_names={"JSESSIONID"}
+    )
 
     await store.async_save(session)
     assert MemoryStore.saved is not None
@@ -182,6 +189,63 @@ async def test_store_clear_removes_saved_data(monkeypatch: pytest.MonkeyPatch) -
             "updated_at": "2026-08-31T15:00:00+00:00",
             "cookies": [{"name": "JSESSIONID", "value": NESTED_SECRET, "path": "relative"}],
         },
+        {
+            "schema": 1,
+            "refresh_token": REFRESH_SECRET,
+            "token": TOKEN_SECRET,
+            "user_id": "user",
+            "member_name": "member",
+            "updated_at": "2026-08-31T15:00:00+00:00",
+            "cookies": [
+                {
+                    "name": "JSESSIONID",
+                    "value": NESTED_SECRET,
+                    "domain": "online.kepco.co.kr",
+                    "path": "/",
+                    "secure": True,
+                    "expires": True,
+                    "host_only": True,
+                }
+            ],
+        },
+        {
+            "schema": 1,
+            "refresh_token": REFRESH_SECRET,
+            "token": TOKEN_SECRET,
+            "user_id": "user",
+            "member_name": "member",
+            "updated_at": "2026-08-31T15:00:00+00:00",
+            "cookies": [
+                {
+                    "name": "JSESSIONID",
+                    "value": NESTED_SECRET,
+                    "domain": "online.kepco.co.kr",
+                    "path": "/",
+                    "secure": True,
+                    "expires": False,
+                    "host_only": True,
+                }
+            ],
+        },
+        {
+            "schema": 1,
+            "refresh_token": REFRESH_SECRET,
+            "token": TOKEN_SECRET,
+            "user_id": "user",
+            "member_name": "member",
+            "updated_at": "2026-08-31T15:00:00+00:00",
+            "cookies": [
+                {
+                    "name": "JSESSIONID",
+                    "value": NESTED_SECRET,
+                    "domain": "online.kepco.co.kr",
+                    "path": "/",
+                    "secure": True,
+                    "expires": -1,
+                    "host_only": True,
+                }
+            ],
+        },
     ],
 )
 def test_malformed_or_unknown_schema_raises_safe_protocol_error(
@@ -224,6 +288,73 @@ def test_session_payload_is_json_safe_and_excludes_username_password() -> None:
     assert json.loads(encoded) == payload
     assert "username" not in payload
     assert "password" not in payload
+    assert payload["cookies"] == []
+
+
+def test_session_payload_filters_cookies_before_store_receives_them() -> None:
+    future = int(datetime(2099, 1, 1, tzinfo=UTC).timestamp())
+    session = make_session(
+        cookies=(
+            KepcoCookie(
+                name="JSESSIONID",
+                value=COOKIE_SECRET,
+                domain="online.kepco.co.kr",
+                path="/",
+                secure=True,
+                expires=future,
+                host_only=True,
+            ),
+            KepcoCookie(name="JSESSIONID", value="BAD_DOMAIN", domain="evil.example", path="/"),
+            KepcoCookie(
+                name="JSESSIONID",
+                value="BAD_PATH",
+                domain="online.kepco.co.kr",
+                path="bad",
+            ),
+            KepcoCookie(
+                name="JSESSIONID",
+                value="EXPIRED",
+                domain="online.kepco.co.kr",
+                path="/",
+                expires=1,
+            ),
+            KepcoCookie(name="tracking", value="TRACKER", domain="online.kepco.co.kr", path="/"),
+        )
+    )
+
+    payload = session_to_payload(session, allowed_cookie_names={"JSESSIONID"}, now=utc_now())
+
+    assert payload["cookies"] == [
+        {
+            "name": "JSESSIONID",
+            "value": COOKIE_SECRET,
+            "domain": "online.kepco.co.kr",
+            "path": "/",
+            "secure": True,
+            "expires": future,
+            "host_only": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_store_save_filters_disallowed_cookies_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on.session_store as session_store
+
+    monkeypatch.setattr(session_store, "Store", MemoryStore)
+    store = KepcoOnSessionStore(cast("HomeAssistant", object()), "entry-1")
+    await store.async_save(
+        make_session(
+            cookies=(
+                KepcoCookie(name="JSESSIONID", value=COOKIE_SECRET, domain="online.kepco.co.kr"),
+            )
+        )
+    )
+
+    assert MemoryStore.saved is not None
+    assert MemoryStore.saved["cookies"] == []
 
 
 @pytest.mark.asyncio
@@ -258,6 +389,7 @@ async def test_export_cookies_keeps_only_allowed_nonexpired_kepco_rooted_cookies
             path="/",
             secure=True,
             expires=1_788_192_000,
+            host_only=False,
         ),
     )
 
@@ -284,6 +416,7 @@ async def test_restore_cookies_keeps_only_allowed_nonexpired_valid_cookie_shapes
             path="/",
             secure=True,
             expires=1_798_728_000,
+            host_only=True,
         ),
         KepcoCookie(
             name="kepcoSSO",
@@ -321,8 +454,85 @@ def test_cookie_repr_hides_value_and_preserves_secure_expires_fields() -> None:
         path="/kepco",
         secure=True,
         expires=1_798_728_000,
+        host_only=True,
     )
 
     assert COOKIE_SECRET not in repr(cookie)
     assert cookie.secure is True
     assert cookie.expires == 1_798_728_000
+
+
+@pytest.mark.asyncio
+async def test_host_only_restore_is_not_sent_to_subdomain() -> None:
+    jar = CookieJar()
+
+    restore_cookies(
+        jar,
+        (
+            KepcoCookie(
+                name="JSESSIONID",
+                value=COOKIE_SECRET,
+                domain="online.kepco.co.kr",
+                path="/",
+                secure=True,
+                host_only=True,
+            ),
+            KepcoCookie(
+                name="kepcoSSO",
+                value="DOMAIN_SECRET",
+                domain=".kepco.co.kr",
+                path="/",
+                secure=True,
+                host_only=False,
+            ),
+        ),
+        {"JSESSIONID", "kepcoSSO"},
+        now=utc_now(),
+    )
+
+    exact_host = jar.filter_cookies(URL("https://online.kepco.co.kr/"))
+    subdomain = jar.filter_cookies(URL("https://sub.online.kepco.co.kr/"))
+
+    assert set(exact_host) == {"JSESSIONID", "kepcoSSO"}
+    assert set(subdomain) == {"kepcoSSO"}
+
+
+@pytest.mark.asyncio
+async def test_export_preserves_host_only_state_from_cookie_jar() -> None:
+    jar = CookieJar()
+    add_cookie(jar, name="JSESSIONID", value=COOKIE_SECRET, domain=None)
+
+    cookies = export_cookies(jar, {"JSESSIONID"}, now=utc_now())
+
+    assert cookies == (
+        KepcoCookie(
+            name="JSESSIONID",
+            value=COOKIE_SECRET,
+            domain="online.kepco.co.kr",
+            path="/",
+            secure=True,
+            host_only=True,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_derives_max_age_deadline_and_drops_after_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = utc_now()
+    monkeypatch.setattr("aiohttp.cookiejar.time.time", lambda: now.timestamp())
+    jar = CookieJar()
+    add_cookie(
+        jar,
+        name="JSESSIONID",
+        value=COOKIE_SECRET,
+        domain="online.kepco.co.kr",
+        max_age=60,
+    )
+
+    exported = export_cookies(jar, {"JSESSIONID"}, now=now)
+    dropped = export_cookies(jar, {"JSESSIONID"}, now=now + timedelta(seconds=61))
+
+    assert exported[0].expires == int((now + timedelta(seconds=60)).timestamp())
+    assert dropped == ()
