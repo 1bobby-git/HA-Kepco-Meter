@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date
 from hashlib import sha256
 
@@ -14,6 +15,9 @@ from .models import (
 )
 
 SUPPORTED_APARTMENT_CONTRACT = "아파트(단일계약)"
+ASCII_INTEGER_PATTERN = re.compile(r"-?(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)")
+ASCII_DATE_PATTERN = re.compile(r"[0-9]{8}")
+ASCII_YEAR_MONTH_PATTERN = re.compile(r"[0-9]{6}")
 
 
 def parse_int(value: object, field_name: str) -> int | None:
@@ -28,6 +32,8 @@ def parse_int(value: object, field_name: str) -> int | None:
         normalized = value.strip()
         if normalized == "" or normalized.lower() == "null":
             return None
+        if not ASCII_INTEGER_PATTERN.fullmatch(normalized):
+            raise KepcoOnProtocolError(f"{field_name} must be an integer")
         normalized = normalized.replace(",", "")
         try:
             return int(normalized)
@@ -45,7 +51,7 @@ def parse_date(value: object, field_name: str) -> date | None:
     normalized = value.strip()
     if normalized == "" or normalized.lower() == "null":
         return None
-    if len(normalized) != 8 or not normalized.isdecimal():
+    if not ASCII_DATE_PATTERN.fullmatch(normalized):
         raise KepcoOnProtocolError(f"{field_name} must be a YYYYMMDD string")
     try:
         return date(int(normalized[0:4]), int(normalized[4:6]), int(normalized[6:8]))
@@ -62,7 +68,7 @@ def parse_year_month(value: object, field_name: str) -> str | None:
     normalized = value.strip()
     if normalized == "" or normalized.lower() == "null":
         return None
-    if len(normalized) != 6 or not normalized.isdecimal():
+    if not ASCII_YEAR_MONTH_PATTERN.fullmatch(normalized):
         raise KepcoOnProtocolError(f"{field_name} must be a YYYYMM string")
     month = int(normalized[4:6])
     if month < 1 or month > 12:
@@ -196,11 +202,8 @@ def _result_payload(payload: dict[str, object]) -> dict[str, object]:
 
 
 def _raise_for_bill_status(payload: dict[str, object], result: dict[str, object]) -> None:
-    status = _first_present(payload, result, "status", "statusCode")
     rs_msg = payload.get("rsMsg")
-    if status is None and isinstance(rs_msg, dict):
-        status = rs_msg.get("statusCode")
-    if status is not None and status != "S":
+    if not isinstance(rs_msg, dict) or rs_msg.get("statusCode") != "S":
         raise KepcoOnProtocolError("KEPCO ON bill status is not successful")
 
 

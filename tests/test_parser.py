@@ -10,6 +10,7 @@ from typing import Protocol, cast
 
 import pytest
 from custom_components.kepco_on.exceptions import KepcoOnNoCustomersError, KepcoOnProtocolError
+from custom_components.kepco_on.models import KepcoCoordinatorData
 from custom_components.kepco_on.parser import (
     parse_bill,
     parse_customers,
@@ -27,6 +28,8 @@ type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValu
 class FixtureExtractor(Protocol):
     """Subset of the extractor module used by parser fixture tests."""
 
+    def _build_fixtures(self, records: list[dict[str, object]]) -> dict[str, dict[str, object]]: ...
+
     def _strip_sensitive(self, value: JsonValue) -> JsonValue: ...
 
     def _audit_fixtures(self, fixtures: dict[str, dict[str, JsonValue]]) -> None: ...
@@ -43,6 +46,11 @@ def load_extractor() -> FixtureExtractor:
     module = module_from_spec(spec)
     spec.loader.exec_module(module)
     return cast("FixtureExtractor", module)
+
+
+def as_object_dict(value: object) -> dict[str, object]:
+    assert isinstance(value, dict)
+    return cast("dict[str, object]", value)
 
 
 @pytest.mark.parametrize(
@@ -65,6 +73,15 @@ def test_parse_int_rejects_nonempty_invalid_value() -> None:
         parse_int("not-a-number", "amount")
 
 
+@pytest.mark.parametrize(
+    "value",
+    ["1,2,3", "\uff11", "\uff11\uff12\uff13", "+123", "--123", "123-"],
+)
+def test_parse_int_rejects_non_ascii_and_bad_grouping(value: str) -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_int(value, "amount")
+
+
 def test_parse_date_is_strict() -> None:
     assert parse_date("20260731", "period_end") == date(2026, 7, 31)
 
@@ -77,6 +94,21 @@ def test_parse_year_month_is_strict() -> None:
 
     with pytest.raises(KepcoOnProtocolError):
         parse_year_month("202613", "bill_month")
+
+
+@pytest.mark.parametrize("value", ["\uff12\uff10\uff12\uff16\uff10\uff17", "2026\uff107"])
+def test_parse_year_month_rejects_unicode_digits(value: str) -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_year_month(value, "bill_month")
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["\uff12\uff10\uff12\uff16\uff10\uff17\uff13\uff11", "202607\uff131"],
+)
+def test_parse_date_rejects_unicode_digits(value: str) -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_date(value, "period_end")
 
 
 def test_parse_customers_accepts_single_customer_append_list() -> None:
@@ -100,9 +132,7 @@ def test_parse_customers_accepts_multiple_my_page_append_list() -> None:
         "TEST_CUST_001",
         "TEST_CUST_002",
     ]
-    assert {customer.stable_key for customer in customers} == {
-        customer.stable_key for customer in customers
-    }
+    assert len({customer.stable_key for customer in customers}) == len(customers)
     assert customers[0].stable_key != customers[1].stable_key
 
 
@@ -201,14 +231,31 @@ def test_parse_requested_bill_uses_requested_month_over_response_month() -> None
 
 
 def test_parse_bill_status_success_accepts_hxi001() -> None:
-    bill = parse_bill({"status": "S", "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"}, None)
+    bill = parse_bill(
+        {"rsMsg": {"statusCode": "S"}, "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        None,
+    )
 
     assert bill.bill_month == "202608"
 
 
-def test_parse_bill_rejects_non_success_status() -> None:
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        {"status": "S", "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        {"rsMsg": {"statusCode": "F"}, "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        {
+            "status": "S",
+            "rsMsg": {"statusCode": "F"},
+            "DO_ERR_CODE": "HXI001",
+            "DO_BILL_YM": "202608",
+        },
+    ],
+)
+def test_parse_bill_requires_successful_rsmsg_status(payload: dict[str, object]) -> None:
     with pytest.raises(KepcoOnProtocolError):
-        parse_bill({"status": "F", "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"}, None)
+        parse_bill(payload, None)
 
 
 def test_parse_bill_history_must_be_sorted_unique_and_valid() -> None:
@@ -232,8 +279,7 @@ def test_parse_bill_history_must_be_sorted_unique_and_valid() -> None:
 
 def test_parse_bill_rejects_large_response_history_month_contradiction() -> None:
     payload = load_fixture("bill_202607.json")
-    result = payload["dma_result"]
-    assert isinstance(result, dict)
+    result = as_object_dict(payload["dma_result"])
     result["DO_BILL_YM"] = "202701"
 
     with pytest.raises(KepcoOnProtocolError):
@@ -243,7 +289,7 @@ def test_parse_bill_rejects_large_response_history_month_contradiction() -> None
 def test_parse_bill_empty_values_are_none_and_comma_numbers_work() -> None:
     bill = parse_bill(
         {
-            "status": "S",
+            "rsMsg": {"statusCode": "S"},
             "DO_ERR_CODE": "HXI001",
             "DO_BILL_YM": "202608",
             "USE_QTY": "",
@@ -256,6 +302,10 @@ def test_parse_bill_empty_values_are_none_and_comma_numbers_work() -> None:
     assert bill.amount_krw == 96330
 
 
+def test_coordinator_data_does_not_expose_raw_payload_field() -> None:
+    assert "raw" not in KepcoCoordinatorData.__dataclass_fields__
+
+
 def test_extractor_strips_nested_generic_personal_secret_keys() -> None:
     extractor = load_extractor()
     payload: dict[str, JsonValue] = {
@@ -264,6 +314,12 @@ def test_extractor_strips_nested_generic_personal_secret_keys() -> None:
         "nested": {
             "accessToken": "SECRET_ACCESS",
             "authToken": "SECRET_AUTH",
+            "customerName": "private customer",
+            "CUST_NM": "private cust nm",
+            "USER_NM": "private user nm",
+            "userNm": "private user camel",
+            "memberName": "private member",
+            "mbrsNm": "private member abbreviated",
             "phone": "01000000000",
             "children": [
                 {"mobile": "01011112222"},
@@ -281,9 +337,53 @@ def test_extractor_strips_nested_generic_personal_secret_keys() -> None:
 
 def test_extractor_audit_rejects_nested_generic_personal_secret_keys() -> None:
     extractor = load_extractor()
-    fixture: dict[str, dict[str, JsonValue]] = {
-        "unsafe.json": {"nested": [{"accessToken": "SECRET_ACCESS"}]}
-    }
+    for key in ("accessToken", "customerName", "CUST_NM", "USER_NM", "userNm", "memberName"):
+        fixture: dict[str, dict[str, JsonValue]] = {"unsafe.json": {"nested": [{key: "private"}]}}
+        with pytest.raises(SystemExit):
+            extractor._audit_fixtures(fixture)
+
+
+def test_extractor_rejects_duplicate_fixture_selectors() -> None:
+    extractor = load_extractor()
+    session_body = json.dumps(load_fixture("session_check_success.json"))
+    sso_body = json.dumps(load_fixture("sso_check_success.json"))
+    single_body = json.dumps(load_fixture("customer_list_single.json"))
+    multiple_body = json.dumps(load_fixture("customer_list_multiple.json"))
+    latest_body = json.dumps(load_fixture("bill_latest.json"))
+    requested_body = json.dumps(load_fixture("bill_202607.json"))
+    records = [
+        {
+            "__capture_line__": 274,
+            "url": "https://online.kepco.co.kr/sessionCheck",
+            "body": session_body,
+        },
+        {"__capture_line__": 307, "url": "https://online.kepco.co.kr/ssoCheck", "body": sso_body},
+        {
+            "__capture_line__": 328,
+            "url": "https://online.kepco.co.kr/my/indi/info/custNoList",
+            "body": single_body,
+        },
+        {
+            "__capture_line__": 295,
+            "url": "https://online.kepco.co.kr/my/indi/info/myPageCustNoList",
+            "body": multiple_body,
+        },
+        {
+            "__capture_line__": 380,
+            "url": "https://online.kepco.co.kr/my/charge/pay/aptBillDetail",
+            "body": latest_body,
+        },
+        {
+            "__capture_line__": 380,
+            "url": "https://online.kepco.co.kr/my/charge/pay/aptBillDetail",
+            "body": latest_body,
+        },
+        {
+            "__capture_line__": 604,
+            "url": "https://online.kepco.co.kr/my/charge/pay/aptBillDetail",
+            "body": requested_body,
+        },
+    ]
 
     with pytest.raises(SystemExit):
-        extractor._audit_fixtures(fixture)
+        extractor._build_fixtures(records)

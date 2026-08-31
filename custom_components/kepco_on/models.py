@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from types import MappingProxyType
-from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +118,6 @@ class KepcoCoordinatorData:
     bills_by_customer_key: Mapping[str, KepcoBill] = field(
         default_factory=lambda: MappingProxyType({})
     )
-    raw: Mapping[str, Any] = field(default_factory=lambda: MappingProxyType({}), repr=False)
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -127,7 +125,6 @@ class KepcoCoordinatorData:
             "bills_by_customer_key",
             MappingProxyType(dict(self.bills_by_customer_key)),
         )
-        object.__setattr__(self, "raw", MappingProxyType(dict(self.raw)))
 
 
 __all__ = [
