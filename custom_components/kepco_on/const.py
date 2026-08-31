@@ -30,6 +30,8 @@ CONF_ACCOUNT_UID_HASH = "account_uid_hash"
 CONF_CUSTOMERS = "customers"
 CONF_DISPLAY_NAME = "display_name"
 CONF_SESSION_HANDOFF = "session_handoff"
+# Task 6 must consume CONF_SESSION_HANDOFF into the private session Store and
+# scrub it from entry data; until then HA redaction must treat it as sensitive.
 SENSITIVE_CONFIG_DATA_KEYS = frozenset({CONF_PASSWORD, CONF_SESSION_HANDOFF})
 
 DATA_STABLE_KEY = "stable_key"

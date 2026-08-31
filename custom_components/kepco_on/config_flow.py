@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
+import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -60,6 +60,9 @@ from .session_store import session_to_payload
 DEFAULT_TITLE = "한전ON"
 DEFAULT_CO2_FACTOR = 0.459
 DEFAULT_HISTORY_MONTHS = 12
+MIN_CO2_FACTOR = 0.001
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class FlowSessionStore:
@@ -112,16 +115,26 @@ def _serialize_customer(customer: KepcoCustomer) -> dict[str, Any]:
     }
 
 
+def _require_nonempty_str(payload: Mapping[str, Any], key: str) -> str:
+    value = payload[key]
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Invalid stored KEPCO ON customer field: {key}")
+    return value
+
+
 def _deserialize_customer(payload: Mapping[str, Any]) -> KepcoCustomer:
+    is_supported = payload[DATA_IS_SUPPORTED]
+    if not isinstance(is_supported, bool):
+        raise ValueError("Invalid stored KEPCO ON customer field: is_supported")
     return KepcoCustomer(
-        stable_key=str(payload[DATA_STABLE_KEY]),
-        apartment_name=str(payload[DATA_APARTMENT_NAME]),
-        dong=str(payload[DATA_DONG]),
-        ho=str(payload[DATA_HO]),
-        contract_method=str(payload[DATA_CONTRACT_METHOD]),
-        is_supported=bool(payload[DATA_IS_SUPPORTED]),
-        _customer_number=str(payload[DATA_CUSTOMER_NUMBER]),
-        _house_contract_number=str(payload[DATA_HOUSE_CONTRACT_NUMBER]),
+        stable_key=_require_nonempty_str(payload, DATA_STABLE_KEY),
+        apartment_name=_require_nonempty_str(payload, DATA_APARTMENT_NAME),
+        dong=_require_nonempty_str(payload, DATA_DONG),
+        ho=_require_nonempty_str(payload, DATA_HO),
+        contract_method=_require_nonempty_str(payload, DATA_CONTRACT_METHOD),
+        is_supported=is_supported,
+        _customer_number=_require_nonempty_str(payload, DATA_CUSTOMER_NUMBER),
+        _house_contract_number=_require_nonempty_str(payload, DATA_HOUSE_CONTRACT_NUMBER),
     )
 
 
@@ -156,12 +169,14 @@ def _customer_schema(
 def _base_user_schema() -> vol.Schema:
     return vol.Schema(
         {
-            vol.Required(CONF_USERNAME): str,
+            vol.Required(CONF_USERNAME): selector.TextSelector(selector.TextSelectorConfig()),
             vol.Required(CONF_PASSWORD): selector.TextSelector(
                 selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
             ),
             vol.Optional(CONF_SAVE_PASSWORD, default=False): bool,
-            vol.Optional(CONF_DISPLAY_NAME, default=""): str,
+            vol.Optional(CONF_DISPLAY_NAME, default=""): selector.TextSelector(
+                selector.TextSelectorConfig()
+            ),
         }
     )
 
@@ -201,14 +216,27 @@ def _valid_selected(selected: object, available: set[str]) -> list[str] | None:
     if not isinstance(selected, list) or not selected:
         return None
     normalized = [str(value) for value in selected]
+    if len(set(normalized)) != len(normalized):
+        return None
     if any(value not in available for value in normalized):
         return None
     return normalized
 
 
+def _selected_customers(
+    customers: tuple[KepcoCustomer, ...], selected: list[str]
+) -> tuple[KepcoCustomer, ...]:
+    selected_set = set(selected)
+    by_key = {customer.stable_key: customer for customer in customers}
+    return tuple(by_key[key] for key in selected if key in selected_set)
+
+
 async def _close_session(client_session: Any | None) -> None:
     if client_session is not None and not getattr(client_session, "closed", False):
-        await client_session.close()
+        try:
+            await client_session.close()
+        except Exception:
+            _LOGGER.warning("Failed to close KEPCO ON config flow session", exc_info=True)
 
 
 class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -225,7 +253,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         pending = self._pending
         self._pending = None
         if pending is not None:
-            asyncio.get_running_loop().create_task(_close_session(pending.client_session))
+            self.hass.async_create_task(_close_session(pending.client_session))
         super().async_remove()
 
     @staticmethod
@@ -313,7 +341,10 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_USERNAME: pending.username,
             CONF_SAVE_PASSWORD: pending.save_password,
             CONF_ACCOUNT_UID_HASH: pending.account_uid_hash,
-            CONF_CUSTOMERS: [_serialize_customer(customer) for customer in pending.customers],
+            CONF_CUSTOMERS: [
+                _serialize_customer(customer)
+                for customer in _selected_customers(pending.customers, selected)
+            ],
             CONF_SELECTED_CUSTOMERS: selected,
             CONF_SESSION_HANDOFF: session_to_payload(pending.session),
         }
@@ -366,9 +397,8 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             session = await auth.async_login(username, password)
             account_uid_hash = _account_uid_hash(session.user_id)
-            if account_uid_hash != entry.unique_id and account_uid_hash != entry.data.get(
-                CONF_ACCOUNT_UID_HASH
-            ):
+            expected_account_uid_hash = entry.unique_id or entry.data.get(CONF_ACCOUNT_UID_HASH)
+            if account_uid_hash != expected_account_uid_hash:
                 raise KepcoOnAuthError("Authenticated KEPCO ON account does not match entry")
             client = KepcoOnClient(auth)
             await client.async_get_account_type()
@@ -396,7 +426,9 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             preserved = [customers[0].stable_key]
         data = dict(entry.data)
         data[CONF_ACCOUNT_UID_HASH] = account_uid_hash
-        data[CONF_CUSTOMERS] = [_serialize_customer(customer) for customer in customers]
+        data[CONF_CUSTOMERS] = [
+            _serialize_customer(customer) for customer in _selected_customers(customers, preserved)
+        ]
         data[CONF_SELECTED_CUSTOMERS] = preserved
         data[CONF_SESSION_HANDOFF] = session_to_payload(session)
         if data.get(CONF_SAVE_PASSWORD):
@@ -451,23 +483,20 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
         self, user_input: dict[str, Any] | None = None
     ) -> config_entries.ConfigFlowResult:
         """Manage integration options."""
-        customers = _stored_customers(self._config_entry.data) or ()
         if user_input is None:
-            return self.async_show_form(step_id="init", data_schema=self._schema(customers))
+            return self.async_show_form(step_id="init", data_schema=self._schema())
 
-        options, error = self._validate_options(customers, user_input)
+        options, error = self._validate_options(user_input)
         if error is not None:
             return self.async_show_form(
                 step_id="init",
-                data_schema=self._schema(customers),
+                data_schema=self._schema(),
                 errors={"base": error},
             )
         return self.async_create_entry(title=None, data=options)
 
-    def _schema(self, customers: tuple[KepcoCustomer, ...]) -> vol.Schema:
+    def _schema(self) -> vol.Schema:
         options = self._config_entry.options
-        data = self._config_entry.data
-        selected = list(options.get(CONF_SELECTED_CUSTOMERS, data.get(CONF_SELECTED_CUSTOMERS, [])))
         return vol.Schema(
             {
                 vol.Required(
@@ -477,13 +506,6 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
                     selector.SelectSelectorConfig(
                         options=[str(value) for value in POLLING_INTERVAL_HOURS],
                         mode=selector.SelectSelectorMode.DROPDOWN,
-                    )
-                ),
-                vol.Required(CONF_SELECTED_CUSTOMERS, default=selected): selector.SelectSelector(
-                    selector.SelectSelectorConfig(
-                        options=_customer_options(customers),
-                        multiple=True,
-                        mode=selector.SelectSelectorMode.LIST,
                     )
                 ),
                 vol.Optional(
@@ -499,7 +521,7 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
                     default=options.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
-                        min=0,
+                        min=MIN_CO2_FACTOR,
                         max=10,
                         step="any",
                         mode=selector.NumberSelectorMode.BOX,
@@ -521,15 +543,8 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
 
     def _validate_options(
         self,
-        customers: tuple[KepcoCustomer, ...],
         user_input: Mapping[str, Any],
     ) -> tuple[dict[str, Any], str | None]:
-        selected = _valid_selected(
-            user_input.get(CONF_SELECTED_CUSTOMERS),
-            {customer.stable_key for customer in customers},
-        )
-        if selected is None:
-            return {}, "invalid_selection"
         try:
             interval = int(
                 user_input.get(OPT_POLLING_INTERVAL_HOURS, DEFAULT_POLLING_INTERVAL_HOURS)
@@ -555,7 +570,6 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
         return (
             {
                 OPT_POLLING_INTERVAL_HOURS: interval,
-                CONF_SELECTED_CUSTOMERS: selected,
                 OPT_ENABLE_DETAILED_SENSORS: bool(
                     user_input.get(OPT_ENABLE_DETAILED_SENSORS, False)
                 ),

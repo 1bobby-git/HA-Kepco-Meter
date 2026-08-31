@@ -116,6 +116,12 @@ class FakeHass:
     def __init__(self) -> None:
         self.config_entries = FakeConfigEntries()
         self.loop = None
+        self.created_tasks: list[asyncio.Task[None]] = []
+
+    def async_create_task(self, target: Any) -> asyncio.Task[None]:
+        task = asyncio.create_task(target)
+        self.created_tasks.append(task)
+        return task
 
 
 class FakeConfigEntry:
@@ -132,7 +138,7 @@ class FakeConfigEntry:
     ) -> None:
         self.data = dict(data)
         self.options = dict(options or {})
-        self.unique_id = unique_id or cast("str", data[CONF_ACCOUNT_UID_HASH])
+        self.unique_id: str | None = unique_id or cast("str", data[CONF_ACCOUNT_UID_HASH])
         self.title = title
         self.entry_id = entry_id
         self.update_listeners: list[Any] = []
@@ -149,6 +155,13 @@ class FakeSession:
 
     async def close(self) -> None:
         self.closed = True
+
+
+class FailingCloseSession(FakeSession):
+    """Session that fails on close without exposing the secret in the exception text."""
+
+    async def close(self) -> None:
+        raise RuntimeError("close failed")
 
 
 class MemoryStore:
@@ -390,6 +403,7 @@ async def test_user_success_then_customer_creates_private_entry(
     assert data[CONF_SAVE_PASSWORD] is False
     assert data[CONF_ACCOUNT_UID_HASH] == account_hash("SERVER_USER")
     assert data[CONF_SELECTED_CUSTOMERS] == ["key-1"]
+    assert len(data[CONF_CUSTOMERS]) == 1
     assert data[CONF_CUSTOMERS][0][DATA_CUSTOMER_NUMBER] == RAW_CUSTOMER_SECRET
     assert data[CONF_CUSTOMERS][0][DATA_HOUSE_CONTRACT_NUMBER] == RAW_HOUSE_SECRET
     assert data[CONF_SESSION_HANDOFF]["cookies"] == []
@@ -448,10 +462,37 @@ async def test_multiple_customers_and_empty_selection_recovery(
 
 
 @pytest.mark.asyncio
+async def test_customer_entry_stores_raw_ids_only_for_selected_customer() -> None:
+    FakeClient.customer_results = [(customer("key-1"), customer("key-2", apartment="별빛아파트"))]
+    flow = make_flow()
+    await reach_customer_step(flow)
+
+    result = await flow.async_step_customer({CONF_SELECTED_CUSTOMERS: ["key-1"]})
+
+    serialized = result["data"][CONF_CUSTOMERS]
+    assert [item["stable_key"] for item in serialized] == ["key-1"]
+    rendered_data = json.dumps(result["data"], ensure_ascii=False)
+    assert "CUST2" not in rendered_data
+    assert "HOUSE2" not in rendered_data
+
+
+@pytest.mark.asyncio
+async def test_customer_step_rejects_duplicate_selected_keys() -> None:
+    flow = make_flow()
+    await reach_customer_step(flow)
+
+    result = await flow.async_step_customer({CONF_SELECTED_CUSTOMERS: ["key-1", "key-1"]})
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "invalid_selection"}
+
+
+@pytest.mark.asyncio
 async def test_flow_abandonment_closes_pending_login_session(
     patched_flow_dependencies: list[FakeSession],
 ) -> None:
     flow = make_flow()
+    fake_hass = cast("FakeHass", flow.hass)
     await reach_customer_step(flow)
     assert not bool(patched_flow_dependencies[0].closed)
     assert cast("Any", flow)._pending is not None
@@ -459,10 +500,47 @@ async def test_flow_abandonment_closes_pending_login_session(
     remove_flow = cast("Any", flow.async_remove)
     remove_flow()
     remove_flow()
-    await asyncio.sleep(0)
+    assert len(fake_hass.created_tasks) == 1
+    await fake_hass.created_tasks[0]
 
     assert bool(patched_flow_dependencies[0].closed)
     assert cast("Any", flow)._pending is None
+
+
+@pytest.mark.asyncio
+async def test_flow_abandonment_close_failure_is_observed_without_secret_logging(
+    caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on.config_flow as config_flow
+
+    sessions: list[FailingCloseSession] = []
+
+    def make_session(
+        hass: FakeHass,
+        *,
+        auto_cleanup: bool,
+        cookie_jar: CookieJar,
+    ) -> FailingCloseSession:
+        del hass, auto_cleanup
+        session = FailingCloseSession()
+        session.cookie_jar = cookie_jar
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(config_flow, "async_create_clientsession", make_session)
+    caplog.set_level(logging.DEBUG)
+    flow = make_flow()
+    fake_hass = cast("FakeHass", flow.hass)
+    await reach_customer_step(flow)
+
+    flow.async_remove()
+    await fake_hass.created_tasks[0]
+
+    assert sessions
+    assert "Failed to close KEPCO ON config flow session" in caplog.text
+    assert PASSWORD_SECRET not in caplog.text
+    assert TOKEN_SECRET not in caplog.text
 
 
 @pytest.mark.asyncio
@@ -538,6 +616,23 @@ async def test_duplicate_account_aborts_after_server_user_id_hash() -> None:
 
 
 @pytest.mark.asyncio
+async def test_user_schema_uses_text_selectors_for_username_display_and_password() -> None:
+    flow = make_flow()
+
+    result = await flow.async_step_user()
+    schema = result["data_schema"].schema
+    schema_by_key = {key.schema: value for key, value in schema.items()}
+
+    assert isinstance(schema_by_key[CONF_USERNAME], object)
+    assert schema_by_key[CONF_USERNAME].selector_type == "text"
+    assert "type" not in schema_by_key[CONF_USERNAME].config
+    assert schema_by_key[CONF_PASSWORD].selector_type == "text"
+    assert schema_by_key[CONF_PASSWORD].config["type"] == "password"
+    assert schema_by_key[CONF_DISPLAY_NAME].selector_type == "text"
+    assert "type" not in schema_by_key[CONF_DISPLAY_NAME].config
+
+
+@pytest.mark.asyncio
 async def test_session_handoff_and_errors_do_not_leak_to_logs(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -601,7 +696,6 @@ async def test_options_flow_accepts_valid_values() -> None:
     result = await flow.async_step_init(
         {
             OPT_POLLING_INTERVAL_HOURS: 12,
-            CONF_SELECTED_CUSTOMERS: ["key-2"],
             OPT_ENABLE_DETAILED_SENSORS: True,
             OPT_ENABLE_CO2_ESTIMATE: True,
             OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
@@ -612,7 +706,6 @@ async def test_options_flow_accepts_valid_values() -> None:
     assert result["type"] == "create_entry"
     assert result["data"] == {
         OPT_POLLING_INTERVAL_HOURS: 12,
-        CONF_SELECTED_CUSTOMERS: ["key-2"],
         OPT_ENABLE_DETAILED_SENSORS: True,
         OPT_ENABLE_CO2_ESTIMATE: True,
         OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
@@ -630,15 +723,12 @@ async def test_options_flow_rejects_invalid_values() -> None:
 
     valid = {
         OPT_POLLING_INTERVAL_HOURS: 6,
-        CONF_SELECTED_CUSTOMERS: ["key-1"],
         OPT_ENABLE_DETAILED_SENSORS: False,
         OPT_ENABLE_CO2_ESTIMATE: False,
         OPT_CO2_FACTOR_KG_PER_KWH: 0.459,
         OPT_HISTORY_MONTHS: 12,
     }
     for payload, error in (
-        ({**valid, CONF_SELECTED_CUSTOMERS: []}, "invalid_selection"),
-        ({**valid, CONF_SELECTED_CUSTOMERS: ["missing"]}, "invalid_selection"),
         ({**valid, OPT_POLLING_INTERVAL_HOURS: "bad"}, "unknown"),
         ({**valid, OPT_POLLING_INTERVAL_HOURS: 2}, "unknown"),
         ({**valid, OPT_CO2_FACTOR_KG_PER_KWH: "bad"}, "invalid_co2_factor"),
@@ -665,9 +755,16 @@ async def test_options_flow_default_form_values() -> None:
     data_schema = result["data_schema"]
     assert data_schema is not None
     schema = data_schema.schema
+    selector_configs = [getattr(value, "config", {}) for value in schema.values()]
+    assert all("selected_customers" not in str(key.schema) for key in schema)
+    assert all("selected_customers" not in str(config) for config in selector_configs)
     defaults = [key.default() for key in schema]
     assert DEFAULT_POLLING_INTERVAL_HOURS in defaults
     assert 0.459 in defaults
+    co2_selector = next(
+        value for key, value in schema.items() if key.schema == OPT_CO2_FACTOR_KG_PER_KWH
+    )
+    assert co2_selector.config["min"] == 0.001
 
 
 @pytest.mark.asyncio
@@ -693,6 +790,7 @@ async def test_reauth_success_updates_existing_entry_and_preserves_available_sel
     assert result["reason"] == "reauth_successful"
     assert entry.data[CONF_PASSWORD] == PASSWORD_SECRET
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-1"]
+    assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-1"]
     assert entry.data[CONF_SESSION_HANDOFF]["cookies"] == []
     assert fake_hass.config_entries.reloads == [entry.entry_id]
     assert patched_flow_dependencies[0].closed is True
@@ -720,6 +818,7 @@ async def test_reauth_entry_step_shows_password_form_and_success_without_saving_
     assert result["type"] == "abort"
     assert CONF_PASSWORD not in entry.data
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
+    assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-2"]
     assert fake_hass.config_entries.reloads == [entry.entry_id]
 
 
@@ -764,6 +863,45 @@ async def test_reauth_rejects_account_mismatch() -> None:
     assert result["type"] == "form"
     assert result["errors"] == {"base": "invalid_auth"}
     assert fake_hass.config_entries.updates == []
+
+
+@pytest.mark.asyncio
+async def test_reauth_requires_unique_id_match_before_legacy_data_hash() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    entry.unique_id = account_hash("SERVER_USER")
+    entry.data[CONF_ACCOUNT_UID_HASH] = account_hash("OTHER_USER")
+    flow = KepcoOnConfigFlow()
+    fake_hass = attach_fake_hass(flow)
+    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
+    FakeAuth.login_results = [account_session("OTHER_USER")]
+
+    result = await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "invalid_auth"}
+    assert fake_hass.config_entries.updates == []
+
+
+@pytest.mark.asyncio
+async def test_reauth_uses_data_hash_only_for_legacy_missing_unique_id() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    entry.unique_id = None
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
+
+    result = await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "reauth_successful"
 
 
 @pytest.mark.asyncio
@@ -822,7 +960,7 @@ async def test_reconfigure_rejects_empty_or_unknown_selection() -> None:
     flow.flow_id = "flow-1"
     cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
 
-    for selected in ([], ["missing"]):
+    for selected in ([], ["missing"], ["key-1", "key-1"]):
         result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: selected})
         assert result["type"] == "form"
         assert result["errors"] == {"base": "invalid_selection"}
@@ -832,7 +970,27 @@ async def test_reconfigure_rejects_empty_or_unknown_selection() -> None:
 async def test_reconfigure_aborts_when_stored_customers_are_empty_or_invalid() -> None:
     from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
 
-    for stored_customers in ([], [{"stable_key": "key-1"}]):
+    invalid_customer = {
+        "stable_key": "key-1",
+        "apartment_name": "푸른아파트",
+        "dong": "101",
+        "ho": "1001",
+        "contract_method": "아파트(단일계약)",
+        "is_supported": "False",
+        DATA_CUSTOMER_NUMBER: RAW_CUSTOMER_SECRET,
+        DATA_HOUSE_CONTRACT_NUMBER: RAW_HOUSE_SECRET,
+    }
+    empty_string_customer = {
+        **invalid_customer,
+        "is_supported": True,
+        DATA_CUSTOMER_NUMBER: "",
+    }
+    for stored_customers in (
+        [],
+        [{"stable_key": "key-1"}],
+        [invalid_customer],
+        [empty_string_customer],
+    ):
         entry = make_entry()
         entry.data[CONF_CUSTOMERS] = stored_customers
         flow = KepcoOnConfigFlow()

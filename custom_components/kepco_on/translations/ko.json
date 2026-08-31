@@ -67,10 +67,9 @@
     "step": {
       "init": {
         "title": "한전ON 옵션",
-        "description": "조회 주기, 센서, CO2 추정, 고객 선택을 조정합니다.",
+        "description": "조회 주기, 센서, CO2 추정, 이력 설정을 조정합니다.",
         "data": {
           "polling_interval_hours": "조회 주기",
-          "selected_customers": "고객",
           "enable_detailed_sensors": "상세 센서 사용",
           "enable_co2_estimate": "CO2 추정 사용",
           "co2_factor_kg_per_kwh": "CO2 계수 (kg/kWh)",
@@ -78,7 +77,6 @@
         },
         "data_description": {
           "polling_interval_hours": "한전ON 업데이트 사이의 시간입니다.",
-          "selected_customers": "이 항목이 모니터링할 고객입니다.",
           "enable_detailed_sensors": "추가 진단 센서를 생성합니다.",
           "enable_co2_estimate": "전력 사용량으로 CO2 배출량을 추정합니다.",
           "co2_factor_kg_per_kwh": "10 이하의 양수 소수 계수입니다.",

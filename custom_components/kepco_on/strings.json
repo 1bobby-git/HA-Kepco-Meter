@@ -67,10 +67,9 @@
     "step": {
       "init": {
         "title": "KEPCO ON options",
-        "description": "Adjust polling, sensors, CO2 estimate, and customer selection.",
+        "description": "Adjust polling, sensors, CO2 estimate, and history settings.",
         "data": {
           "polling_interval_hours": "Polling interval",
-          "selected_customers": "Customers",
           "enable_detailed_sensors": "Enable detailed sensors",
           "enable_co2_estimate": "Enable CO2 estimate",
           "co2_factor_kg_per_kwh": "CO2 factor (kg/kWh)",
@@ -78,7 +77,6 @@
         },
         "data_description": {
           "polling_interval_hours": "Hours between KEPCO ON updates.",
-          "selected_customers": "Customers monitored by this entry.",
           "enable_detailed_sensors": "Create additional diagnostic sensors.",
           "enable_co2_estimate": "Estimate CO2 emissions from electricity use.",
           "co2_factor_kg_per_kwh": "Positive decimal factor up to 10.",
