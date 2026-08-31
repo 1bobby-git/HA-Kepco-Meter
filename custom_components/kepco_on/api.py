@@ -248,10 +248,18 @@ class KepcoOnClient:
             ENDPOINT_MYPAGE_CUST_NO_LIST,
             {
                 "dma_search": {
-                    "searchKeyword": "",
-                    "searchType": "MYPAGE",
+                    "schYm": "",
+                    "custNo": "",
+                    "gubun": "",
                     "schChart": "12",
-                    "months": "13",
+                    "CUST_NO": "",
+                    "housCntrNo": "",
+                    "yyyymm": "",
+                    "searchType": "",
+                    "dong": "",
+                    "ho": "",
+                    "months": "",
+                    "chgYmd": "",
                 }
             },
             submission_id="mf_wfm_layout_sbm_myPageCustList",

@@ -573,12 +573,22 @@ async def test_client_get_customers_uses_mypage_endpoint_body_and_parser() -> No
         assert submission_id == "mf_wfm_layout_sbm_myPageCustList"
         assert payload == {
             "dma_search": {
-                "searchKeyword": "",
-                "searchType": "MYPAGE",
+                "schYm": "",
+                "custNo": "",
+                "gubun": "",
                 "schChart": "12",
-                "months": "13",
+                "CUST_NO": "",
+                "housCntrNo": "",
+                "yyyymm": "",
+                "searchType": "",
+                "dong": "",
+                "ho": "",
+                "months": "",
+                "chgYmd": "",
             }
         }
+        dma_search = cast("dict[str, str]", payload["dma_search"])
+        assert "searchKeyword" not in dma_search
         return {
             "dlt_myPageAppendList": [
                 {
