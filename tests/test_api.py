@@ -1,0 +1,459 @@
+"""Transport and business API tests for KEPCO ON."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
+from email.utils import format_datetime
+from typing import Any, cast
+
+import pytest
+from aiohttp import ClientSession, web
+from aresponses import Response, ResponsesMockServer
+from custom_components.kepco_on.api import KepcoOnClient, KepcoOnTransport
+from custom_components.kepco_on.exceptions import (
+    KepcoOnConnectionError,
+    KepcoOnProtocolError,
+    KepcoOnRateLimitError,
+    KepcoOnSessionExpired,
+    KepcoOnUnsupportedAccount,
+)
+from custom_components.kepco_on.models import KepcoCustomer
+
+HOST = "online.kepco.co.kr"
+REFERER = "https://online.kepco.co.kr/MYM001D00"
+ORIGIN = "https://online.kepco.co.kr/"
+REFRESH_SECRET = "REFRESH_SECRET_CANARY"
+PASSWORD_SECRET = "PASSWORD_SECRET_CANARY"
+SLEEP_CALLS: list[float] = []
+
+
+async def sleep_recorder(seconds: float) -> None:
+    SLEEP_CALLS.append(seconds)
+
+
+def json_response(payload: dict[str, object], *, status: int = 200) -> Response:
+    return Response(
+        text=json.dumps(payload),
+        status=status,
+        content_type="application/json",
+        charset="UTF-8",
+    )
+
+
+async def request_json(request: web.Request) -> dict[str, object]:
+    return cast("dict[str, object]", json.loads((await request.read()).decode()))
+
+
+async def with_transport(
+    handler: Callable[[KepcoOnTransport], Awaitable[object]],
+    server: ResponsesMockServer,
+) -> object:
+    async with server, ClientSession() as session:
+        transport = KepcoOnTransport(session, sleep=sleep_recorder)
+        return await handler(transport)
+
+
+@pytest.fixture(autouse=True)
+def reset_sleep_calls() -> None:
+    SLEEP_CALLS.clear()
+
+
+@pytest.mark.asyncio
+async def test_transport_posts_json_headers_to_allowlisted_kepco_path() -> None:
+    captured: dict[str, object] = {}
+
+    async def route(request: web.Request) -> Response:
+        captured["method"] = request.method
+        captured["path"] = request.path
+        captured["body"] = await request_json(request)
+        captured["headers"] = dict(request.headers)
+        return json_response({"ok": True})
+
+    server = ResponsesMockServer()
+    server.add(HOST, "/sessionCheck", "post", response=route)
+
+    await with_transport(
+        lambda transport: transport.request_json(
+            "/sessionCheck",
+            {"refreshToken": REFRESH_SECRET, "userId": "user", "mbrsNm": "member"},
+            refresh_token=REFRESH_SECRET,
+            submission_id="mf_test",
+        ),
+        server,
+    )
+
+    headers = cast("dict[str, str]", captured["headers"])
+    assert captured["method"] == "POST"
+    assert captured["path"] == "/sessionCheck"
+    assert captured["body"] == {
+        "refreshToken": REFRESH_SECRET,
+        "userId": "user",
+        "mbrsNm": "member",
+    }
+    assert headers["Accept"] == "application/json"
+    assert headers["Content-Type"] == "application/json; charset=UTF-8"
+    assert headers["Referer"] == REFERER
+    assert headers["Origin"] == ORIGIN
+    assert headers["refreshToken"] == REFRESH_SECRET
+    assert headers["submissionid"] == "mf_test"
+    assert "sec-ch-ua" not in {key.lower() for key in headers}
+    assert "sec-fetch-site" not in {key.lower() for key in headers}
+
+
+@pytest.mark.asyncio
+async def test_transport_accepts_json_content_type_with_charset() -> None:
+    server = ResponsesMockServer()
+    server.add(HOST, "/sessionCheck", "post", response=json_response({"result": True}))
+
+    result = await with_transport(
+        lambda transport: transport.request_json("/sessionCheck", {}), server
+    )
+
+    assert result == {"result": True}
+
+
+@pytest.mark.asyncio
+async def test_transport_treats_html_login_markup_as_expired_without_secret_leak() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(
+            text=f"<html><form>login {PASSWORD_SECRET}</form></html>",
+            content_type="text/html",
+        ),
+    )
+
+    with pytest.raises(KepcoOnSessionExpired) as raised:
+        await with_transport(
+            lambda transport: transport.request_json("/sessionCheck", {"pwdVal": PASSWORD_SECRET}),
+            server,
+        )
+
+    assert PASSWORD_SECRET not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_non_json_200_response() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(text="not-json", content_type="text/plain"),
+    )
+
+    with pytest.raises(KepcoOnProtocolError):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+
+@pytest.mark.asyncio
+async def test_transport_handles_204_as_empty_payload() -> None:
+    server = ResponsesMockServer()
+    server.add(HOST, "/sessionCheck", "post", response=Response(status=204))
+
+    result = await with_transport(
+        lambda transport: transport.request_json("/sessionCheck", {}), server
+    )
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_transport_enforces_two_mebibyte_response_limit() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(
+            body=b"{" + (b'"x":' + b'"' + (b"a" * (2 * 1024 * 1024)) + b'"}'),
+            content_type="application/json",
+        ),
+    )
+
+    with pytest.raises(KepcoOnProtocolError):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_final_host_mismatch_after_redirect() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(status=302, headers={"Location": "https://evil.example/sessionCheck"}),
+    )
+    server.add(
+        "evil.example",
+        "/sessionCheck",
+        "get",
+        response=json_response({"result": True}),
+    )
+
+    with pytest.raises(KepcoOnProtocolError):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", [401, 403])
+async def test_transport_maps_401_and_403_to_session_expired(status: int) -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST, "/sessionCheck", "post", response=json_response({"error": "expired"}, status=status)
+    )
+
+    with pytest.raises(KepcoOnSessionExpired):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+
+@pytest.mark.asyncio
+async def test_transport_honors_integer_retry_after_then_raises_rate_limit() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=json_response({"error": "rate"}, status=429),
+    )
+    server._responses[0][1].headers["Retry-After"] = "7"
+
+    with pytest.raises(KepcoOnRateLimitError):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+    assert SLEEP_CALLS == [7.0]
+
+
+@pytest.mark.asyncio
+async def test_transport_honors_http_date_retry_after_then_raises_rate_limit() -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    server = ResponsesMockServer()
+    response = json_response({"error": "rate"}, status=429)
+    response.headers["Retry-After"] = format_datetime(
+        datetime(2026, 9, 1, 1, 0, 9, tzinfo=UTC), usegmt=True
+    )
+    server.add(HOST, "/sessionCheck", "post", response=response)
+
+    with pytest.raises(KepcoOnRateLimitError):
+        await with_transport(
+            lambda transport: transport.request_json("/sessionCheck", {}, clock=lambda: now),
+            server,
+        )
+
+    assert SLEEP_CALLS == [9.0]
+
+
+@pytest.mark.asyncio
+async def test_transport_retries_5xx_twice_with_exponential_backoff() -> None:
+    server = ResponsesMockServer()
+    server.add(HOST, "/sessionCheck", "post", response=json_response({"error": "bad"}, status=503))
+    server.add(HOST, "/sessionCheck", "post", response=json_response({"error": "bad"}, status=502))
+    server.add(HOST, "/sessionCheck", "post", response=json_response({"result": True}))
+
+    result = await with_transport(
+        lambda transport: transport.request_json("/sessionCheck", {}), server
+    )
+
+    assert result == {"result": True}
+    assert SLEEP_CALLS == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_transport_wraps_network_errors_without_secret_leak() -> None:
+    async with ClientSession() as session:
+        transport = KepcoOnTransport(session, sleep=sleep_recorder)
+        with pytest.raises(KepcoOnConnectionError) as raised:
+            await transport.request_json("/sessionCheck", {"pwdVal": PASSWORD_SECRET})
+
+    assert PASSWORD_SECRET not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_client_get_account_type_accepts_indi_and_rejects_other_types() -> None:
+    class Auth:
+        calls = 0
+
+        async def async_protected_request(
+            self, path: str, payload: dict[str, object] | None, *, submission_id: str | None = None
+        ) -> dict[str, object]:
+            self.calls += 1
+            assert path == "/isCorp"
+            assert payload is None
+            assert submission_id is None
+            return {"userClNm": "INDI" if self.calls == 1 else "CORP"}
+
+        def account_uid_hash(self) -> str:
+            return "HASH"
+
+    auth = Auth()
+    client = KepcoOnClient(cast("Any", auth))
+
+    assert await client.async_get_account_type() == "INDI"
+    with pytest.raises(KepcoOnUnsupportedAccount):
+        await client.async_get_account_type()
+
+
+@pytest.mark.asyncio
+async def test_client_get_customers_uses_mypage_endpoint_body_and_parser() -> None:
+    async def protected_request(
+        path: str, payload: dict[str, object] | None, *, submission_id: str | None = None
+    ) -> dict[str, object]:
+        assert path == "/my/indi/info/myPageCustNoList"
+        assert submission_id == "mf_wfm_layout_sbm_myPageCustList"
+        assert payload == {
+            "dma_search": {
+                "searchKeyword": "",
+                "searchType": "MYPAGE",
+                "schChart": "12",
+                "months": "13",
+            }
+        }
+        return {
+            "dlt_myPageAppendList": [
+                {
+                    "APT_DONGNO": "1001",
+                    "APT_HONO": "0101",
+                    "APT_NAME": "테스트아파트",
+                    "CUST_NO": "TEST_CUST_001",
+                    "SI_CUST_NO": "TEST_HOUSE_001",
+                    "cntrMthdCd": "아파트(단일계약)",
+                }
+            ]
+        }
+
+    class Auth:
+        async_protected_request = staticmethod(protected_request)
+
+        def account_uid_hash(self) -> str:
+            return "ACCOUNT_HASH"
+
+    customers = await KepcoOnClient(cast("Any", Auth())).async_get_customers()
+
+    assert customers[0].customer_number == "TEST_CUST_001"
+    assert customers[0].house_contract_number == "TEST_HOUSE_001"
+
+
+@pytest.mark.asyncio
+async def test_client_get_bill_uses_latest_and_historical_bodies() -> None:
+    calls: list[dict[str, object]] = []
+
+    async def protected_request(
+        path: str, payload: dict[str, object] | None, *, submission_id: str | None = None
+    ) -> dict[str, object]:
+        assert path == "/my/charge/pay/aptBillDetail"
+        assert submission_id == "mf_wfm_layout_sbm_search"
+        assert payload is not None
+        calls.append(payload)
+        return {
+            "rsMsg": {"statusCode": "S"},
+            "DO_ERR_CODE": "HXI001",
+            "DO_BILL_YM": "202608",
+        }
+
+    class Auth:
+        async_protected_request = staticmethod(protected_request)
+
+        def account_uid_hash(self) -> str:
+            return "ACCOUNT_HASH"
+
+    customer = KepcoCustomer(
+        stable_key="key",
+        apartment_name="apt",
+        dong="101",
+        ho="1001",
+        contract_method="아파트(단일계약)",
+        is_supported=True,
+        _customer_number="CUST",
+        _house_contract_number="HOUSE",
+    )
+    client = KepcoOnClient(cast("Any", Auth()))
+
+    latest = await client.async_get_bill(customer)
+    history = await client.async_get_bill(customer, "202607")
+
+    assert latest.bill_month == "202608"
+    assert history.bill_month == "202607"
+    assert calls == [
+        {
+            "dma_search": {
+                "custNo": "CUST",
+                "housCntrNo": "HOUSE",
+                "yymm": "",
+                "yyyymm": "",
+                "searchType": "DETAIL",
+            }
+        },
+        {
+            "dma_search": {
+                "custNo": "CUST",
+                "housCntrNo": "HOUSE",
+                "yymm": "202607",
+                "yyyymm": "202607",
+                "searchType": "DETAIL",
+            }
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_client_rejects_bad_or_future_month_before_request() -> None:
+    class Auth:
+        requests = 0
+
+        async def async_protected_request(
+            self, path: str, payload: dict[str, object] | None, *, submission_id: str | None = None
+        ) -> dict[str, object]:
+            del path, payload, submission_id
+            self.requests += 1
+            return {}
+
+        def account_uid_hash(self) -> str:
+            return "ACCOUNT_HASH"
+
+    auth = Auth()
+    customer = KepcoCustomer("key", "apt", "101", "1001", "method", True, "CUST", "HOUSE")
+    client = KepcoOnClient(cast("Any", auth), clock=lambda: datetime(2026, 9, 1, tzinfo=UTC))
+
+    for month in ("2026-07", "202613", "202610"):
+        with pytest.raises(KepcoOnProtocolError):
+            await client.async_get_bill(customer, month)
+
+    assert auth.requests == 0
+
+
+@pytest.mark.asyncio
+async def test_client_get_all_current_bills_runs_sequentially() -> None:
+    in_flight = 0
+    max_in_flight = 0
+
+    async def protected_request(
+        path: str, payload: dict[str, object] | None, *, submission_id: str | None = None
+    ) -> dict[str, object]:
+        nonlocal in_flight, max_in_flight
+        del path, payload, submission_id
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0)
+        in_flight -= 1
+        return {"rsMsg": {"statusCode": "S"}, "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"}
+
+    class Auth:
+        async_protected_request = staticmethod(protected_request)
+
+        def account_uid_hash(self) -> str:
+            return "ACCOUNT_HASH"
+
+    customers = (
+        KepcoCustomer("key-1", "apt", "101", "1001", "method", True, "CUST1", "HOUSE1"),
+        KepcoCustomer("key-2", "apt", "102", "1002", "method", True, "CUST2", "HOUSE2"),
+    )
+
+    bills = await KepcoOnClient(cast("Any", Auth())).async_get_all_current_bills(customers)
+
+    assert list(bills) == ["key-1", "key-2"]
+    assert max_in_flight == 1
