@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import socket
+import ssl
 import traceback
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
-from typing import Any, cast
+from pathlib import Path
+from typing import Any, Self, cast
 
+import custom_components.kepco_on.api as kepco_api
 import pytest
-from aiohttp import ClientSession, web
+from aiohttp import ClientSession, ClientTimeout, TCPConnector, web
 from aresponses import Response, ResponsesMockServer
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
+from cryptography.x509.oid import NameOID
 from custom_components.kepco_on.api import KepcoOnClient, KepcoOnTransport
 from custom_components.kepco_on.exceptions import (
     KepcoOnConnectionError,
@@ -22,6 +31,7 @@ from custom_components.kepco_on.exceptions import (
     KepcoOnUnsupportedAccount,
 )
 from custom_components.kepco_on.models import KepcoCustomer
+from yarl import URL
 
 HOST = "online.kepco.co.kr"
 REFERER = "https://online.kepco.co.kr/MYM001D00"
@@ -32,8 +42,68 @@ TOKEN_SECRET = "TOKEN_SECRET_CANARY"
 SLEEP_CALLS: list[float] = []
 
 
+class StaticLocalResolver:
+    """Resolve the fixed KEPCO host to the local redirect test server."""
+
+    async def resolve(
+        self,
+        host: str,
+        port: int = 0,
+        family: socket.AddressFamily = socket.AF_INET,
+    ) -> list[dict[str, object]]:
+        del family
+        return [
+            {
+                "hostname": host,
+                "host": "127.0.0.1",
+                "port": port,
+                "family": socket.AF_INET,
+                "proto": 0,
+                "flags": socket.AI_NUMERICHOST,
+            }
+        ]
+
+    async def close(self) -> None:
+        """No resolver resources to close."""
+
+
 async def sleep_recorder(seconds: float) -> None:
     SLEEP_CALLS.append(seconds)
+
+
+def make_server_ssl_context(tmp_path: Path) -> ssl.SSLContext:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    now = datetime.now(UTC)
+    subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, HOST)])
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(private_key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=1))
+        .add_extension(
+            x509.SubjectAlternativeName(
+                [x509.DNSName(HOST), x509.IPAddress(ipaddress.ip_address("127.0.0.1"))]
+            ),
+            critical=False,
+        )
+        .sign(private_key, hashes.SHA256())
+    )
+    cert_path = tmp_path / "cert.pem"
+    key_path = tmp_path / "key.pem"
+    cert_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        private_key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.TraditionalOpenSSL,
+            serialization.NoEncryption(),
+        )
+    )
+    context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+    context.load_cert_chain(cert_path, key_path)
+    return context
 
 
 def json_response(payload: dict[str, object], *, status: int = 200) -> Response:
@@ -264,6 +334,66 @@ async def test_transport_rejects_final_http_scheme_even_when_host_matches() -> N
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("status", [302, 307])
+async def test_transport_rejects_redirect_without_forwarding_credentials_or_body(
+    status: int,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target_requests: list[dict[str, object]] = []
+    redirect_port: int | None = None
+
+    async def redirect_source(request: web.Request) -> web.Response:
+        assert await request_json(request) == {"refreshToken": REFRESH_SECRET}
+        assert request.headers["refreshToken"] == REFRESH_SECRET
+        assert redirect_port is not None
+        return web.Response(
+            status=status,
+            headers={"Location": f"https://{HOST}:{redirect_port}/leak"},
+        )
+
+    async def redirect_target(request: web.Request) -> web.Response:
+        target_requests.append(
+            {
+                "headers": dict(request.headers),
+                "body": await request.read(),
+            }
+        )
+        return web.json_response({"leaked": True})
+
+    app = web.Application()
+    app.router.add_post("/sessionCheck", redirect_source)
+    app.router.add_route("*", "/leak", redirect_target)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(
+        runner,
+        "127.0.0.1",
+        0,
+        ssl_context=make_server_ssl_context(tmp_path),
+    )
+    await site.start()
+    redirect_port = cast("tuple[str, int]", runner.addresses[0])[1]
+    monkeypatch.setattr(kepco_api, "BASE_URL", f"https://{HOST}:{redirect_port}")
+
+    try:
+        connector = TCPConnector(resolver=cast("Any", StaticLocalResolver()), ssl=False)
+        async with ClientSession(connector=connector) as session:
+            transport = KepcoOnTransport(session, sleep=sleep_recorder)
+            with pytest.raises(KepcoOnProtocolError) as raised:
+                await transport.request_json(
+                    "/sessionCheck",
+                    {"refreshToken": REFRESH_SECRET},
+                    refresh_token=REFRESH_SECRET,
+                )
+    finally:
+        await runner.cleanup()
+
+    assert str(raised.value) == "Unexpected KEPCO ON response: redirects are not allowed"
+    assert target_requests == []
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [401, 403])
 async def test_transport_maps_401_and_403_to_session_expired(status: int) -> None:
     server = ResponsesMockServer()
@@ -323,6 +453,79 @@ async def test_transport_retries_5xx_twice_with_exponential_backoff() -> None:
     )
 
     assert result == {"result": True}
+    assert SLEEP_CALLS == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_transport_does_not_unbounded_read_oversized_5xx_response() -> None:
+    class FakeContent:
+        reads = 0
+
+        async def read(self, limit: int = -1) -> bytes:
+            self.reads += 1
+            assert limit == 2 * 1024 * 1024 + 1
+            return b"x" * min(limit, 1024)
+
+    class FakeResponse:
+        status = 500
+        url = URL("https://online.kepco.co.kr/sessionCheck")
+        content_type = "application/json"
+        charset = "utf-8"
+
+        def __init__(self) -> None:
+            self.headers: dict[str, str] = {}
+            self.content = FakeContent()
+            self.released = False
+
+        async def __aenter__(self) -> Self:
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback_obj: object,
+        ) -> None:
+            del exc_type, exc, traceback_obj
+
+        async def read(self) -> bytes:
+            raise AssertionError("5xx retry path must not call unbounded response.read()")
+
+        def release(self) -> None:
+            self.released = True
+
+    class FakeSession:
+        attempts = 0
+        responses: list[FakeResponse]
+
+        def __init__(self) -> None:
+            self.responses = []
+
+        def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, object] | None,
+            headers: dict[str, str],
+            timeout: ClientTimeout,
+            allow_redirects: bool,
+        ) -> FakeResponse:
+            del url, json, headers, timeout
+            assert allow_redirects is False
+            self.attempts += 1
+            response = FakeResponse()
+            self.responses.append(response)
+            return response
+
+    fake_session = FakeSession()
+    transport = KepcoOnTransport(cast("ClientSession", fake_session), sleep=sleep_recorder)
+
+    with pytest.raises(KepcoOnConnectionError):
+        await transport.request_json("/sessionCheck", {})
+
+    assert fake_session.attempts == 3
+    assert [response.content.reads for response in fake_session.responses] == [1, 1, 1]
+    assert [response.released for response in fake_session.responses] == [True, True, True]
     assert SLEEP_CALLS == [1.0, 2.0]
 
 

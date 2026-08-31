@@ -58,8 +58,8 @@ class KepcoOnAuth:
         session: ClientSession,
         *,
         store: SessionStore,
-        username: str,
-        password: str | None,
+        reauth_username: str | None = None,
+        reauth_password: str | None = None,
         clock: ClockCallback = _utc_now,
     ) -> None:
         self._transport = KepcoOnTransport(session)
@@ -67,8 +67,8 @@ class KepcoOnAuth:
             raise KepcoOnProtocolError("KEPCO ON auth requires an aiohttp CookieJar")
         self._cookie_jar = session.cookie_jar
         self._store = store
-        self._username = username.strip()
-        self._password = password
+        self._reauth_username = reauth_username.strip() if reauth_username is not None else None
+        self._reauth_password = reauth_password
         self._clock = clock
         self._current_session: KepcoAccountSession | None = None
         self._generation = 0
@@ -79,10 +79,10 @@ class KepcoOnAuth:
         """Return the current account session."""
         return self._current_session
 
-    async def async_login(self) -> KepcoAccountSession:
-        """Authenticate with saved credentials and persist the session."""
+    async def async_login(self, username: str, password: str) -> KepcoAccountSession:
+        """Authenticate with one-off credentials and persist the session."""
         async with self._auth_lock:
-            return await self._async_login_unlocked()
+            return await self._async_login_unlocked(username, password)
 
     async def async_restore_session(self) -> bool:
         """Restore persisted session state and allowed cookies."""
@@ -98,32 +98,35 @@ class KepcoOnAuth:
         self._current_session = session
         return True
 
-    async def async_validate_session(self) -> KepcoAccountSession:
+    async def async_validate_session(self) -> bool:
         """Validate and rotate the current session tokens."""
         session = self._require_current_session()
-        payload = await self._transport.request_json(
-            ENDPOINT_SESSION_CHECK,
-            {
-                "refreshToken": session.refresh_token,
-                "userId": session.user_id,
-                "mbrsNm": session.member_name,
-            },
-            refresh_token=session.refresh_token,
-        )
+        try:
+            payload = await self._transport.request_json(
+                ENDPOINT_SESSION_CHECK,
+                {
+                    "refreshToken": session.refresh_token,
+                    "userId": session.user_id,
+                    "mbrsNm": session.member_name,
+                },
+                refresh_token=session.refresh_token,
+            )
+        except KepcoOnSessionExpired:
+            return False
         if payload.get("result") is not True:
-            raise KepcoOnSessionExpired("KEPCO ON session expired")
+            return False
         updated = self._session_from_validation(payload, session)
         await self._save_current_session(updated)
-        return updated
+        return True
 
-    async def async_reauthenticate(self) -> KepcoAccountSession:
+    async def async_reauthenticate(self) -> None:
         """Reauthenticate with the configured password."""
         async with self._auth_lock:
-            return await self._async_reauthenticate_unlocked()
+            await self._async_reauthenticate_unlocked()
 
-    def async_export_session_snapshot(self) -> KepcoAccountSession | None:
+    async def async_export_session_snapshot(self) -> KepcoAccountSession:
         """Return the current session snapshot without exposing credentials."""
-        return self._current_session
+        return self._require_current_session()
 
     async def async_sso_check(self) -> str:
         """Run the captured SSO check when explicitly needed by validation."""
@@ -187,17 +190,20 @@ class KepcoOnAuth:
             f"kepco_on:account:v1\0{session.user_id}\0{session.member_name}".encode()
         ).hexdigest()
 
-    async def _async_reauthenticate_unlocked(self) -> KepcoAccountSession:
-        if not self._password:
+    async def _async_reauthenticate_unlocked(self) -> None:
+        if not self._reauth_username or not self._reauth_password:
             raise KepcoOnAuthError("KEPCO ON password is required to reauthenticate")
-        return await self._async_login_unlocked()
+        await self._async_login_unlocked(self._reauth_username, self._reauth_password)
 
-    async def _async_login_unlocked(self) -> KepcoAccountSession:
-        if not self._password:
+    async def _async_login_unlocked(self, username: str, password: str) -> KepcoAccountSession:
+        trimmed_username = username.strip()
+        if not trimmed_username:
+            raise KepcoOnAuthError("KEPCO ON username is required to authenticate")
+        if not password.strip():
             raise KepcoOnAuthError("KEPCO ON password is required to authenticate")
         payload = await self._transport.request_json(
             ENDPOINT_LOGIN_INDI,
-            {"userId": self._username, "pwdVal": self._password, "autoFlag": "N"},
+            {"userId": trimmed_username, "pwdVal": password, "autoFlag": "N"},
             submission_id="mf_login_popup_wframe_sbm_submission4",
         )
         if payload.get("result") == "NO":
@@ -219,9 +225,9 @@ class KepcoOnAuth:
         return session
 
     async def _save_current_session(self, session: KepcoAccountSession) -> None:
+        await self._store.async_save(session)
         self._current_session = session
         self._generation += 1
-        await self._store.async_save(session)
 
     def _session_from_validation(
         self, payload: JsonObject, previous: KepcoAccountSession

@@ -153,6 +153,7 @@ class KepcoOnTransport:
                     json=payload,
                     headers=headers,
                     timeout=ClientTimeout(total=30),
+                    allow_redirects=False,
                 ) as response:
                     return await self._handle_response(response, clock)
             except _TemporaryHttpError as err:
@@ -178,8 +179,12 @@ class KepcoOnTransport:
         if response.url.scheme != "https" or response.url.host != ONLINE_HOST:
             raise _safe_protocol_error("response host changed")
 
+        if 300 <= response.status < 400:
+            response.release()
+            raise _safe_protocol_error("redirects are not allowed")
         if response.status in TRANSIENT_STATUSES:
-            await response.read()
+            await response.content.read(MAX_RESPONSE_BYTES + 1)
+            response.release()
             raise _TemporaryHttpError
         if response.status == 429:
             await self._sleep(_parse_retry_after(response.headers.get("Retry-After"), clock))
