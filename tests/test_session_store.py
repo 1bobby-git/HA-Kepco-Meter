@@ -360,6 +360,7 @@ async def test_store_save_filters_disallowed_cookies_by_default(
 @pytest.mark.asyncio
 async def test_export_cookies_keeps_only_allowed_nonexpired_kepco_rooted_cookies() -> None:
     now = utc_now()
+    future_expiry = datetime(2099, 1, 1, tzinfo=UTC)
     jar = CookieJar()
     add_cookie(
         jar,
@@ -367,7 +368,7 @@ async def test_export_cookies_keeps_only_allowed_nonexpired_kepco_rooted_cookies
         value=COOKIE_SECRET,
         domain="online.kepco.co.kr",
         secure=True,
-        expires=now + timedelta(hours=1),
+        expires=future_expiry,
     )
     add_cookie(jar, name="not_allowed", value="TRACKER", domain="online.kepco.co.kr")
     add_cookie(jar, name="JSESSIONID", value="WRONG_DOMAIN", domain="evil.example")
@@ -388,7 +389,7 @@ async def test_export_cookies_keeps_only_allowed_nonexpired_kepco_rooted_cookies
             domain="online.kepco.co.kr",
             path="/",
             secure=True,
-            expires=1_788_192_000,
+            expires=int(future_expiry.timestamp()),
             host_only=False,
         ),
     )
