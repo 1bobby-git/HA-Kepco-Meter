@@ -1,0 +1,328 @@
+"""Session persistence and cookie-isolation tests for KEPCO ON."""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+from http.cookies import SimpleCookie
+from typing import Any, cast
+
+import pytest
+from aiohttp import CookieJar
+from custom_components.kepco_on.exceptions import KepcoOnProtocolError
+from custom_components.kepco_on.models import KepcoAccountSession, KepcoCookie
+from custom_components.kepco_on.session_store import (
+    KepcoOnSessionStore,
+    export_cookies,
+    restore_cookies,
+    session_from_payload,
+    session_to_payload,
+)
+from homeassistant.core import HomeAssistant
+from yarl import URL
+
+COOKIE_SECRET = "COOKIE_SECRET_CANARY"
+TOKEN_SECRET = "TOKEN_SECRET_CANARY"
+REFRESH_SECRET = "REFRESH_SECRET_CANARY"
+NESTED_SECRET = "NESTED_SECRET_CANARY"
+
+
+class MemoryStore:
+    """Small stand-in for Home Assistant Store used for schema edge cases."""
+
+    saved: dict[str, Any] | None = None
+    removed = False
+    init_args: tuple[Any, ...] | None = None
+    init_kwargs: dict[str, Any] | None = None
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        type(self).init_args = args
+        type(self).init_kwargs = kwargs
+
+    async def async_load(self) -> dict[str, Any] | None:
+        return type(self).saved
+
+    async def async_save(self, data: dict[str, Any]) -> None:
+        type(self).saved = data
+
+    async def async_remove(self) -> None:
+        type(self).removed = True
+        type(self).saved = None
+
+
+@pytest.fixture(autouse=True)
+def reset_memory_store() -> None:
+    MemoryStore.saved = None
+    MemoryStore.removed = False
+    MemoryStore.init_args = None
+    MemoryStore.init_kwargs = None
+
+
+def utc_now() -> datetime:
+    return datetime(2026, 8, 31, 15, 0, tzinfo=UTC)
+
+
+def make_session(*, cookies: tuple[KepcoCookie, ...] = ()) -> KepcoAccountSession:
+    return KepcoAccountSession(
+        refresh_token=REFRESH_SECRET,
+        token=TOKEN_SECRET,
+        user_id="USER_ID_SECRET",
+        member_name="MEMBER_NAME_SECRET",
+        user_mng_seqno="USER_SEQ_SECRET",
+        cookies=cookies,
+        updated_at=utc_now(),
+    )
+
+
+def add_cookie(
+    jar: CookieJar,
+    *,
+    name: str,
+    value: str,
+    domain: str = "online.kepco.co.kr",
+    path: str = "/",
+    secure: bool = True,
+    expires: datetime | None = None,
+) -> None:
+    cookies = SimpleCookie()
+    cookies[name] = value
+    cookies[name]["domain"] = domain
+    cookies[name]["path"] = path
+    if secure:
+        cookies[name]["secure"] = True
+    if expires is not None:
+        cookies[name]["expires"] = expires.strftime("%a, %d %b %Y %H:%M:%S GMT")
+    jar.update_cookies(cookies, URL(f"https://{domain.removeprefix('.')}/"))
+
+
+def assert_canaries_absent(text: str) -> None:
+    for canary in (COOKIE_SECRET, TOKEN_SECRET, REFRESH_SECRET, NESTED_SECRET):
+        assert canary not in text
+
+
+@pytest.mark.asyncio
+async def test_store_load_returns_none_when_no_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    import custom_components.kepco_on.session_store as session_store
+
+    monkeypatch.setattr(session_store, "Store", MemoryStore)
+
+    hass = cast("HomeAssistant", object())
+    loaded = await KepcoOnSessionStore(hass, "entry-1").async_load()
+
+    assert loaded is None
+    assert MemoryStore.init_args == (hass, 1, "kepco_on.entry-1")
+    assert MemoryStore.init_kwargs == {"atomic_writes": True, "private": True}
+
+
+@pytest.mark.asyncio
+async def test_store_save_load_round_trip_uses_versioned_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on.session_store as session_store
+
+    monkeypatch.setattr(session_store, "Store", MemoryStore)
+    session = make_session(
+        cookies=(
+            KepcoCookie(
+                name="JSESSIONID",
+                value=COOKIE_SECRET,
+                domain="online.kepco.co.kr",
+                path="/",
+                secure=True,
+                expires=1_798_729_200,
+            ),
+        )
+    )
+    store = KepcoOnSessionStore(cast("HomeAssistant", object()), "entry-1")
+
+    await store.async_save(session)
+    assert MemoryStore.saved is not None
+    assert MemoryStore.saved["schema"] == 1
+    assert MemoryStore.saved["updated_at"] == "2026-08-31T15:00:00+00:00"
+
+    loaded = await store.async_load()
+
+    assert loaded == session
+    assert json.loads(json.dumps(MemoryStore.saved)) == MemoryStore.saved
+
+
+@pytest.mark.asyncio
+async def test_store_clear_removes_saved_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    import custom_components.kepco_on.session_store as session_store
+
+    monkeypatch.setattr(session_store, "Store", MemoryStore)
+    store = KepcoOnSessionStore(cast("HomeAssistant", object()), "entry-1")
+    await store.async_save(make_session())
+
+    await store.async_clear()
+
+    assert MemoryStore.removed is True
+    assert await store.async_load() is None
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"schema": 2, "refresh_token": NESTED_SECRET},
+        {"schema": 1, "refresh_token": NESTED_SECRET},
+        {
+            "schema": 1,
+            "refresh_token": REFRESH_SECRET,
+            "token": TOKEN_SECRET,
+            "user_id": "user",
+            "member_name": "member",
+            "updated_at": "not-a-date",
+        },
+        {
+            "schema": 1,
+            "refresh_token": REFRESH_SECRET,
+            "token": TOKEN_SECRET,
+            "user_id": "user",
+            "member_name": "member",
+            "updated_at": "2026-08-31T15:00:00+00:00",
+            "cookies": [{"name": "JSESSIONID", "value": NESTED_SECRET, "path": "relative"}],
+        },
+    ],
+)
+def test_malformed_or_unknown_schema_raises_safe_protocol_error(
+    payload: dict[str, Any],
+) -> None:
+    with pytest.raises(KepcoOnProtocolError) as raised:
+        session_from_payload(payload)
+
+    assert_canaries_absent(str(raised.value))
+
+
+def test_session_repr_and_error_messages_do_not_expose_secret_values() -> None:
+    session = make_session(
+        cookies=(KepcoCookie(name="JSESSIONID", value=COOKIE_SECRET, domain=".kepco.co.kr"),)
+    )
+
+    rendered = repr(session)
+
+    assert_canaries_absent(rendered)
+    with pytest.raises(KepcoOnProtocolError) as raised:
+        session_from_payload(
+            {
+                "schema": 1,
+                "refresh_token": REFRESH_SECRET,
+                "token": TOKEN_SECRET,
+                "user_id": "user",
+                "member_name": "member",
+                "updated_at": "2026-08-31T15:00:00+00:00",
+                "cookies": [{"name": NESTED_SECRET, "value": COOKIE_SECRET, "path": "bad"}],
+            }
+        )
+    assert_canaries_absent(str(raised.value))
+
+
+def test_session_payload_is_json_safe_and_excludes_username_password() -> None:
+    payload = session_to_payload(make_session())
+
+    encoded = json.dumps(payload)
+
+    assert json.loads(encoded) == payload
+    assert "username" not in payload
+    assert "password" not in payload
+
+
+@pytest.mark.asyncio
+async def test_export_cookies_keeps_only_allowed_nonexpired_kepco_rooted_cookies() -> None:
+    now = utc_now()
+    jar = CookieJar()
+    add_cookie(
+        jar,
+        name="JSESSIONID",
+        value=COOKIE_SECRET,
+        domain="online.kepco.co.kr",
+        secure=True,
+        expires=now + timedelta(hours=1),
+    )
+    add_cookie(jar, name="not_allowed", value="TRACKER", domain="online.kepco.co.kr")
+    add_cookie(jar, name="JSESSIONID", value="WRONG_DOMAIN", domain="evil.example")
+    add_cookie(
+        jar,
+        name="kepcoSSO",
+        value="EXPIRED_SECRET",
+        domain=".kepco.co.kr",
+        expires=now - timedelta(seconds=1),
+    )
+
+    cookies = export_cookies(jar, {"JSESSIONID", "kepcoSSO"}, now=now)
+
+    assert cookies == (
+        KepcoCookie(
+            name="JSESSIONID",
+            value=COOKIE_SECRET,
+            domain="online.kepco.co.kr",
+            path="/",
+            secure=True,
+            expires=1_788_192_000,
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_cookies_rejects_non_rooted_paths() -> None:
+    jar = CookieJar()
+    add_cookie(jar, name="JSESSIONID", value=COOKIE_SECRET, path="/")
+    morsel = next(iter(jar))
+    morsel["path"] = "relative"
+
+    assert export_cookies(jar, {"JSESSIONID"}, now=utc_now()) == ()
+
+
+@pytest.mark.asyncio
+async def test_restore_cookies_keeps_only_allowed_nonexpired_valid_cookie_shapes() -> None:
+    now = utc_now()
+    jar = CookieJar()
+    cookies = (
+        KepcoCookie(
+            name="JSESSIONID",
+            value=COOKIE_SECRET,
+            domain="online.kepco.co.kr",
+            path="/",
+            secure=True,
+            expires=1_798_728_000,
+        ),
+        KepcoCookie(
+            name="kepcoSSO",
+            value="EXPIRED_SECRET",
+            domain=".kepco.co.kr",
+            path="/",
+            secure=False,
+            expires=int((now - timedelta(seconds=1)).timestamp()),
+        ),
+        KepcoCookie(name="tracking", value="TRACKER", domain="online.kepco.co.kr", path="/"),
+        KepcoCookie(name="JSESSIONID", value="BAD_DOMAIN", domain="evil.example", path="/"),
+        KepcoCookie(name="JSESSIONID", value="BAD_PATH", domain="online.kepco.co.kr", path="bad"),
+    )
+
+    restore_cookies(jar, cookies, {"JSESSIONID", "kepcoSSO"}, now=now)
+
+    restored = jar.filter_cookies(URL("https://online.kepco.co.kr/"))
+    assert set(restored) == {"JSESSIONID"}
+    assert restored["JSESSIONID"].value == COOKIE_SECRET
+
+
+@pytest.mark.asyncio
+async def test_current_empty_allowlist_persists_zero_cookies_by_default() -> None:
+    jar = CookieJar()
+    add_cookie(jar, name="JSESSIONID", value=COOKIE_SECRET)
+
+    assert export_cookies(jar, set(), now=utc_now()) == ()
+
+
+def test_cookie_repr_hides_value_and_preserves_secure_expires_fields() -> None:
+    cookie = KepcoCookie(
+        name="JSESSIONID",
+        value=COOKIE_SECRET,
+        domain=".kepco.co.kr",
+        path="/kepco",
+        secure=True,
+        expires=1_798_728_000,
+    )
+
+    assert COOKIE_SECRET not in repr(cookie)
+    assert cookie.secure is True
+    assert cookie.expires == 1_798_728_000

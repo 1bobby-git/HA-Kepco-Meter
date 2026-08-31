@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from types import MappingProxyType
 
 
@@ -14,23 +14,30 @@ class KepcoCookie:
 
     name: str
     value: str = field(repr=False)
-    domain: str | None = None
-    path: str | None = None
-    expires_at: datetime | None = None
+    domain: str = "online.kepco.co.kr"
+    path: str = "/"
     secure: bool = True
-    http_only: bool = True
+    expires: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class KepcoAccountSession:
     """Authenticated account session state safe for coordinator use."""
 
-    account_uid_hash: str
+    refresh_token: str = field(repr=False)
+    user_id: str = field(repr=False)
+    member_name: str = field(repr=False)
+    updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    token: str | None = field(default=None, repr=False)
+    user_mng_seqno: str | None = field(default=None, repr=False)
     cookies: tuple[KepcoCookie, ...] = ()
-    tokens: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}), repr=False)
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "tokens", MappingProxyType(dict(self.tokens)))
+        updated_at = self.updated_at
+        if updated_at.tzinfo is None or updated_at.utcoffset() is None:
+            updated_at = updated_at.replace(tzinfo=UTC)
+        object.__setattr__(self, "updated_at", updated_at.astimezone(UTC))
+        object.__setattr__(self, "cookies", tuple(self.cookies))
 
 
 @dataclass(frozen=True, slots=True)
