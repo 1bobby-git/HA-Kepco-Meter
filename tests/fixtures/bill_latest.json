@@ -163,8 +163,8 @@
     "DO_PRE_WLFR_DC_ADDT_CHRG": "0",
     "DO_REQ_TVFEE": "0",
     "DO_TO_MMDD": "20260731",
-    "DO_TP_CMNUS_KWH": "[REDACTED]",
-    "DO_TP_RSD_KWH": "[REDACTED]",
+    "DO_TP_CMNUS_KWH": null,
+    "DO_TP_RSD_KWH": null,
     "DO_WHM_MTR_ALW": "23139"
   },
   "dma_stof": {},

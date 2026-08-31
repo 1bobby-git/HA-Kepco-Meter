@@ -277,8 +277,8 @@ def _stable_customer_key(
     house_contract_number: str,
 ) -> str:
     return sha256(
-        f"{account_uid_hash}\0{customer_number}\0{house_contract_number}".encode()
-    ).hexdigest()[:32]
+        f"kepco_on:customer:v1\0{account_uid_hash}\0{customer_number}\0{house_contract_number}".encode()
+    ).hexdigest()
 
 
 def _required_str(row: dict[str, object], key: str) -> str:

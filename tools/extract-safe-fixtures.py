@@ -16,18 +16,47 @@ EXPECTED_RECORD_COUNT = 611
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE_DIR = ROOT / "tests" / "fixtures"
 
-SENSITIVE_KEYS = {
-    "ADDR",
-    "NAME",
-    "USER_EMAIL_ADDR",
-    "USER_MTEL",
-    "mbrsNm",
-    "name",
-    "userId",
-    "userMngSeqno",
+ALLOWED_SYNTHETIC_CUSTOMER_KEYS = {
+    "APT_DONGNO",
+    "APT_HONO",
+    "APT_NAME",
+    "CUST_NO",
+    "SI_CUST_NO",
+    "cntrMthdCd",
 }
-SENSITIVE_KEY_PARTS = ("cookie", "password", "secret")
-TOKEN_KEYS = {"refreshToken", "token", "ssoToken"}
+SENSITIVE_EXACT_KEYS = {
+    "access_token",
+    "accesstoken",
+    "addr",
+    "address",
+    "auth_token",
+    "authtoken",
+    "email",
+    "emailaddress",
+    "mbrsnm",
+    "mobile",
+    "name",
+    "phone",
+    "refreshtoken",
+    "secret",
+    "set-cookie",
+    "token",
+    "user_email_addr",
+    "user_mtel",
+    "userid",
+    "usermngseqno",
+}
+SENSITIVE_KEY_PARTS = (
+    "addr",
+    "address",
+    "cookie",
+    "email",
+    "mobile",
+    "password",
+    "phone",
+    "secret",
+    "token",
+)
 
 SYNTHETIC_CUSTOMERS = (
     {
@@ -174,18 +203,11 @@ def _history_count(body: dict[str, Any]) -> int:
 
 
 def _sanitize_session(body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "refreshToken": "TEST_REFRESH_TOKEN_SAFE_FIXTURE",
-        "result": body.get("result"),
-        "token": "TEST_SESSION_TOKEN_SAFE_FIXTURE",
-    }
+    return {"result": body.get("result")}
 
 
 def _sanitize_sso(body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "loginChk": body.get("loginChk"),
-        "refreshToken": "TEST_REFRESH_TOKEN_SAFE_FIXTURE",
-    }
+    return {"loginChk": body.get("loginChk")}
 
 
 def _sanitize_customers(body: dict[str, Any], list_key: str, count: int) -> dict[str, Any]:
@@ -208,22 +230,19 @@ def _strip_sensitive(value: Any) -> Any:
         for key, item in value.items():
             if not isinstance(key, str):
                 continue
-            lowered = key.lower()
-            if key in SENSITIVE_KEYS or any(part in lowered for part in SENSITIVE_KEY_PARTS):
+            if _is_sensitive_key(key):
                 continue
-            if key in TOKEN_KEYS:
-                output[key] = f"TEST_{key.upper()}_SAFE_FIXTURE"
-                continue
-            output[key] = _strip_sensitive(item)
+            output[key] = _strip_sensitive(_normalize_placeholder(item))
         return output
     if isinstance(value, list):
         return [_strip_sensitive(item) for item in value]
-    return value
+    return _normalize_placeholder(value)
 
 
 def _audit_fixtures(fixtures: dict[str, dict[str, Any]]) -> None:
     rendered = json.dumps(fixtures, ensure_ascii=False, sort_keys=True)
     forbidden_text = (
+        "[REDACTED]",
         "USER_MTEL",
         "USER_EMAIL_ADDR",
         "ADDR",
@@ -239,19 +258,34 @@ def _audit_fixtures(fixtures: dict[str, dict[str, Any]]) -> None:
     def walk(value: Any, path: tuple[str, ...] = ()) -> None:
         if isinstance(value, dict):
             for key, item in value.items():
-                lowered = key.lower()
-                if any(part in lowered for part in SENSITIVE_KEY_PARTS):
+                if _is_sensitive_key(key):
                     raise SystemExit("sanitized fixtures contain a sensitive key")
                 if key in {"CUST_NO", "SI_CUST_NO"} and not str(item).startswith("TEST_"):
                     raise SystemExit("customer identifiers must be synthetic")
-                if key in TOKEN_KEYS and not str(item).startswith("TEST_"):
-                    raise SystemExit("token values must be synthetic")
                 walk(item, (*path, key))
         elif isinstance(value, list):
             for item in value:
                 walk(item, path)
 
     walk(fixtures)
+
+
+def _is_sensitive_key(key: str) -> bool:
+    if key in ALLOWED_SYNTHETIC_CUSTOMER_KEYS:
+        return False
+    normalized = key.replace("-", "_").lower()
+    compact = normalized.replace("_", "")
+    return (
+        normalized in SENSITIVE_EXACT_KEYS
+        or compact in SENSITIVE_EXACT_KEYS
+        or any(part in normalized for part in SENSITIVE_KEY_PARTS)
+    )
+
+
+def _normalize_placeholder(value: Any) -> Any:
+    if isinstance(value, str) and value.startswith("[") and value.endswith("]"):
+        return None
+    return value
 
 
 def _output_path(name: str) -> Path:

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 from datetime import date
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
+from typing import Protocol, cast
 
 import pytest
 from custom_components.kepco_on.exceptions import KepcoOnNoCustomersError, KepcoOnProtocolError
@@ -17,10 +19,30 @@ from custom_components.kepco_on.parser import (
 )
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
+ROOT = Path(__file__).resolve().parents[1]
+
+type JsonValue = bool | int | float | str | list[JsonValue] | dict[str, JsonValue] | None
+
+
+class FixtureExtractor(Protocol):
+    """Subset of the extractor module used by parser fixture tests."""
+
+    def _strip_sensitive(self, value: JsonValue) -> JsonValue: ...
+
+    def _audit_fixtures(self, fixtures: dict[str, dict[str, JsonValue]]) -> None: ...
 
 
 def load_fixture(name: str) -> dict[str, object]:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+    return cast("dict[str, object]", json.loads((FIXTURES / name).read_text(encoding="utf-8")))
+
+
+def load_extractor() -> FixtureExtractor:
+    spec = spec_from_file_location("extract_safe_fixtures", ROOT / "tools/extract-safe-fixtures.py")
+    assert spec is not None
+    assert spec.loader is not None
+    module = module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return cast("FixtureExtractor", module)
 
 
 @pytest.mark.parametrize(
@@ -100,6 +122,28 @@ def test_parse_customer_repr_does_not_expose_raw_identifiers() -> None:
     assert "TEST_HOUSE_001" not in customer.stable_key
 
 
+def test_customer_stable_key_is_full_domain_separated_sha256() -> None:
+    customer = parse_customers(load_fixture("customer_list_single.json"), "ACCOUNT_HASH")[0]
+    same_customer = parse_customers(load_fixture("customer_list_single.json"), "ACCOUNT_HASH")[0]
+    other_account = parse_customers(
+        load_fixture("customer_list_single.json"), "OTHER_ACCOUNT_HASH"
+    )[0]
+
+    assert len(customer.stable_key) == 64
+    assert all(character in "0123456789abcdef" for character in customer.stable_key)
+    assert customer.stable_key == same_customer.stable_key
+    assert customer.stable_key != other_account.stable_key
+    assert "ACCOUNT_HASH" not in customer.stable_key
+    assert "TEST_CUST_001" not in customer.stable_key
+    assert "TEST_HOUSE_001" not in customer.stable_key
+
+
+def test_generated_fixtures_do_not_contain_bracketed_placeholders() -> None:
+    for path in FIXTURES.glob("*.json"):
+        text = path.read_text(encoding="utf-8")
+        assert "[REDACTED]" not in text
+
+
 def test_parse_latest_bill_extracts_all_governing_values() -> None:
     bill = parse_bill(load_fixture("bill_latest.json"), requested_month=None)
 
@@ -143,6 +187,15 @@ def test_parse_requested_bill_uses_requested_month_over_response_month() -> None
     assert bill.current_meter_reading == 22566
     assert bill.previous_meter_reading == 22160
     assert bill.amount_krw == 59720
+    assert bill.charge.subtotal_krw == 52997
+    assert bill.charge.base_krw == 6060
+    assert bill.charge.energy_krw == 57253
+    assert bill.charge.climate_krw == 3654
+    assert bill.charge.fuel_krw == 2030
+    assert bill.charge.child_discount_krw == -16000
+    assert bill.charge.vat_krw == 5300
+    assert bill.charge.fund_krw == 1430
+    assert bill.charge.rounding_krw == 7
     assert bill.history[0].month == "202408"
     assert bill.history[-1].month == "202607"
 
@@ -179,7 +232,9 @@ def test_parse_bill_history_must_be_sorted_unique_and_valid() -> None:
 
 def test_parse_bill_rejects_large_response_history_month_contradiction() -> None:
     payload = load_fixture("bill_202607.json")
-    payload["dma_result"]["DO_BILL_YM"] = "202701"
+    result = payload["dma_result"]
+    assert isinstance(result, dict)
+    result["DO_BILL_YM"] = "202701"
 
     with pytest.raises(KepcoOnProtocolError):
         parse_bill(payload, requested_month="202607")
@@ -199,3 +254,36 @@ def test_parse_bill_empty_values_are_none_and_comma_numbers_work() -> None:
 
     assert bill.usage_kwh is None
     assert bill.amount_krw == 96330
+
+
+def test_extractor_strips_nested_generic_personal_secret_keys() -> None:
+    extractor = load_extractor()
+    payload: dict[str, JsonValue] = {
+        "safe": "kept",
+        "emailAddress": "private@example.test",
+        "nested": {
+            "accessToken": "SECRET_ACCESS",
+            "authToken": "SECRET_AUTH",
+            "phone": "01000000000",
+            "children": [
+                {"mobile": "01011112222"},
+                {"address": "private address"},
+                {"name": "private name"},
+            ],
+        },
+    }
+
+    sanitized = extractor._strip_sensitive(payload)
+
+    assert isinstance(sanitized, dict)
+    assert sanitized == {"nested": {"children": [{}, {}, {}]}, "safe": "kept"}
+
+
+def test_extractor_audit_rejects_nested_generic_personal_secret_keys() -> None:
+    extractor = load_extractor()
+    fixture: dict[str, dict[str, JsonValue]] = {
+        "unsafe.json": {"nested": [{"accessToken": "SECRET_ACCESS"}]}
+    }
+
+    with pytest.raises(SystemExit):
+        extractor._audit_fixtures(fixture)

@@ -1,5 +1,3 @@
 {
-  "refreshToken": "TEST_REFRESH_TOKEN_SAFE_FIXTURE",
-  "result": true,
-  "token": "TEST_SESSION_TOKEN_SAFE_FIXTURE"
+  "result": true
 }
