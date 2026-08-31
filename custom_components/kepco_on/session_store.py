@@ -70,10 +70,13 @@ def _optional_str(payload: Mapping[str, object], field: str) -> str | None:
 def _parse_updated_at(value: object) -> datetime:
     if not isinstance(value, str):
         raise _protocol_error("updated_at")
+    parsed: datetime | None
     try:
         parsed = datetime.fromisoformat(value)
-    except ValueError as err:
-        raise _protocol_error("updated_at") from err
+    except ValueError:
+        parsed = None
+    if parsed is None:
+        raise _protocol_error("updated_at")
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         raise _protocol_error("updated_at")
     return parsed.astimezone(UTC)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from datetime import UTC, datetime, timedelta
 from http.cookies import SimpleCookie
 from typing import Any, cast
@@ -278,6 +279,28 @@ def test_session_repr_and_error_messages_do_not_expose_secret_values() -> None:
             }
         )
     assert_canaries_absent(str(raised.value))
+
+
+def test_invalid_updated_at_does_not_retain_secret_in_exception_chain() -> None:
+    with pytest.raises(KepcoOnProtocolError) as raised:
+        session_from_payload(
+            {
+                "schema": 1,
+                "refresh_token": REFRESH_SECRET,
+                "token": TOKEN_SECRET,
+                "user_id": "user",
+                "member_name": "member",
+                "updated_at": TOKEN_SECRET,
+            }
+        )
+
+    error = raised.value
+    rendered = "".join(traceback.format_exception(error))
+    assert TOKEN_SECRET not in str(error)
+    assert TOKEN_SECRET not in repr(error)
+    assert error.__cause__ is None
+    assert error.__context__ is None
+    assert TOKEN_SECRET not in rendered
 
 
 def test_session_payload_is_json_safe_and_excludes_username_password() -> None:
