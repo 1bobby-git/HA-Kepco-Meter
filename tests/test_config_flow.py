@@ -580,7 +580,6 @@ async def test_user_step_errors_close_session_and_retry_can_succeed(
         (KepcoOnNoCustomersError("none"), "no_customers"),
         (KepcoOnMfaRequired("mfa"), "mfa_required"),
         (KepcoOnProtocolError("shape"), "protocol_changed"),
-        (RuntimeError("boom"), "unknown"),
     ],
 )
 async def test_user_step_maps_validation_errors(
@@ -603,6 +602,20 @@ async def test_user_step_maps_validation_errors(
     assert result["type"] == "form"
     assert result["errors"] == {"base": error}
     assert patched_flow_dependencies[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_user_step_unexpected_error_propagates_after_cleanup(
+    patched_flow_dependencies: list[FakeSession],
+) -> None:
+    FakeAuth.login_results = [RuntimeError("boom")]
+    flow = make_flow()
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await submit_user(flow)
+
+    assert patched_flow_dependencies[0].closed is True
+    assert cast("Any", flow)._pending is None
 
 
 @pytest.mark.asyncio
@@ -852,6 +865,29 @@ async def test_reauth_failure_reshows_and_never_creates_entry(
     assert result["errors"] == {"base": "invalid_auth"}
     assert fake_hass.config_entries.updates == []
     assert patched_flow_dependencies[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_reauth_unexpected_error_propagates_after_cleanup(
+    patched_flow_dependencies: list[FakeSession],
+) -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    flow = KepcoOnConfigFlow()
+    fake_hass = attach_fake_hass(flow)
+    flow.handler = DOMAIN
+    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
+    FakeAuth.login_results = [RuntimeError("boom")]
+
+    with pytest.raises(RuntimeError, match="boom"):
+        await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
+
+    assert fake_hass.config_entries.updates == []
+    assert patched_flow_dependencies[0].closed is True
+    assert cast("Any", flow)._pending is None
 
 
 @pytest.mark.asyncio

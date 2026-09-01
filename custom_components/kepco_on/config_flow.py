@@ -163,6 +163,17 @@ def _map_error(err: Exception) -> str:
     return "unknown"
 
 
+EXPECTED_CONFIG_FLOW_ERRORS = (
+    KepcoOnAuthError,
+    KepcoOnConnectionError,
+    KepcoOnMfaRequired,
+    KepcoOnNoCustomersError,
+    KepcoOnProtocolError,
+    KepcoOnRateLimitError,
+    KepcoOnUnsupportedAccount,
+)
+
+
 def _can_use_live_reconfigure_client(entry: config_entries.ConfigEntry) -> bool:
     """Return whether the loaded runtime client is usable for reconfigure refresh."""
     if entry.state is not ConfigEntryState.LOADED:
@@ -222,6 +233,9 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             auto_cleanup=False,
             cookie_jar=CookieJar(),
         )
+        abort_reason: str | None = None
+        form_error: str | None = None
+        login_succeeded = False
         try:
             store = FlowSessionStore()
             auth = KepcoOnAuth(client_session, store=store)
@@ -234,15 +248,21 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             account_uid_hash = _account_uid_hash(session.user_id)
             await self.async_set_unique_id(account_uid_hash)
             self._abort_if_unique_id_configured()
+            login_succeeded = True
         except AbortFlow as err:
-            await _close_session(client_session)
-            return self.async_abort(reason=err.reason)
-        except Exception as err:
-            await _close_session(client_session)
+            abort_reason = err.reason
+        except EXPECTED_CONFIG_FLOW_ERRORS as err:
+            form_error = _map_error(err)
+        finally:
+            if not login_succeeded:
+                await _close_session(client_session)
+        if abort_reason is not None:
+            return self.async_abort(reason=abort_reason)
+        if form_error is not None:
             return self.async_show_form(
                 step_id="user",
                 data_schema=_base_user_schema(),
-                errors={"base": _map_error(err)},
+                errors={"base": form_error},
             )
 
         self._pending = PendingConfig(
@@ -329,6 +349,8 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             auto_cleanup=False,
             cookie_jar=CookieJar(),
         )
+        form_error: str | None = None
+        login_succeeded = False
         try:
             store = FlowSessionStore()
             username = str(entry.data[CONF_USERNAME])
@@ -349,8 +371,13 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             customers = await client.async_get_customers()
             if not customers:
                 raise KepcoOnNoCustomersError("No KEPCO ON apartment customers found")
-        except Exception as err:
-            await _close_session(client_session)
+            login_succeeded = True
+        except EXPECTED_CONFIG_FLOW_ERRORS as err:
+            form_error = _map_error(err)
+        finally:
+            if not login_succeeded:
+                await _close_session(client_session)
+        if form_error is not None:
             return self.async_show_form(
                 step_id="reauth_confirm",
                 data_schema=vol.Schema(
@@ -360,7 +387,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         )
                     }
                 ),
-                errors={"base": _map_error(err)},
+                errors={"base": form_error},
             )
 
         new_keys = {customer.stable_key for customer in customers}
