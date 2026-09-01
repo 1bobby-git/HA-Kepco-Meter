@@ -149,6 +149,7 @@ SUMMARY_SAFE_KEYS = frozenset(
         "parsed_fields",
         "polling_interval_hours",
         "runtime",
+        "selected_customer_ids",
         "selected_customer_count",
         "version",
     }
@@ -157,6 +158,7 @@ EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
 JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
 LONG_ID_RE = re.compile(r"\b\d{8,}\b")
 PHONE_RE = re.compile(r"\b(?:\+?82[-.\s]?)?0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}\b")
+STABLE_CUSTOMER_HASH_RE = re.compile(r"[0-9a-f]{64}")
 SECRET_MARKERS = frozenset(
     {
         "access_secret",
@@ -182,6 +184,8 @@ def _deny_key(key: object) -> bool:
 
 def _unsafe_string(value: str) -> bool:
     """Return whether a string value looks sensitive or user-specific."""
+    if STABLE_CUSTOMER_HASH_RE.fullmatch(value) is not None:
+        return False
     lowered = value.lower()
     return (
         any(marker in lowered for marker in SECRET_MARKERS)
@@ -232,6 +236,18 @@ def _entry_selected_customer_count(entry: Any) -> int:
     """Return selected customer count from config data safely."""
     selected = getattr(entry, "data", {}).get("selected_customers", [])
     return _safe_len(selected) if isinstance(selected, list) else 0
+
+
+def _selected_customer_ids(data: KepcoCoordinatorData | None) -> list[str]:
+    """Return response-action-safe customer hashes from loaded coordinator data."""
+    if data is None:
+        return []
+    selected: list[str] = []
+    for customer in data.customers:
+        stable_key = getattr(customer, "stable_key", None)
+        if isinstance(stable_key, str) and STABLE_CUSTOMER_HASH_RE.fullmatch(stable_key):
+            selected.append(stable_key)
+    return selected
 
 
 def _polling_interval_hours(entry: Any) -> int:
@@ -312,6 +328,7 @@ async def async_get_config_entry_diagnostics(
             "account_type": "INDI",
             "polling_interval_hours": _polling_interval_hours(entry),
             "selected_customer_count": _entry_selected_customer_count(entry),
+            "selected_customer_ids": _selected_customer_ids(data),
         },
         "runtime": {
             "loaded": runtime_data is not None,

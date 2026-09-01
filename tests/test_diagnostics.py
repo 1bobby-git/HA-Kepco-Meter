@@ -32,6 +32,11 @@ RAW_BODY_SECRET = "RAW_BODY_SECRET_CANARY"
 HISTORY_SECRET = "HISTORY_SECRET_CANARY"
 JWT_SECRET = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret.payload"
 LONG_CUSTOMER_ID_SECRET = "12345678901234567890"
+VALID_CUSTOMER_HASH = "a" * 64
+NUMERIC_VALID_CUSTOMER_HASH = "1" * 64
+SECOND_VALID_CUSTOMER_HASH = "b" * 64
+UPPERCASE_CUSTOMER_HASH = "C" * 64
+SHORT_CUSTOMER_HASH = "d" * 63
 
 
 class FakeHass:
@@ -80,10 +85,10 @@ class FakeConfigEntry:
         self.runtime_data = runtime_data
 
 
-def customer() -> KepcoCustomer:
+def customer(stable_key: str = "selected-key") -> KepcoCustomer:
     """Return a customer with raw IDs as canaries."""
     return KepcoCustomer(
-        stable_key="selected-key",
+        stable_key=stable_key,
         apartment_name="APT_SECRET_CANARY",
         dong="DONG_SECRET_CANARY",
         ho="HO_SECRET_CANARY",
@@ -92,6 +97,44 @@ def customer() -> KepcoCustomer:
         _customer_number=CUSTOMER_SECRET,
         _house_contract_number=CONTRACT_SECRET,
     )
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_exposes_only_safe_selected_customer_hashes() -> None:
+    """Diagnostics exposes response-action customer hashes without raw identifiers."""
+    from custom_components.kepco_on.diagnostics import async_get_config_entry_diagnostics
+
+    coordinator = SimpleNamespace(
+        last_update_success=True,
+        data=KepcoCoordinatorData(
+            customers=(
+                customer(VALID_CUSTOMER_HASH),
+                customer(NUMERIC_VALID_CUSTOMER_HASH),
+                customer(UPPERCASE_CUSTOMER_HASH),
+                customer(SHORT_CUSTOMER_HASH),
+                customer(LONG_CUSTOMER_ID_SECRET),
+                customer(CUSTOMER_SECRET),
+                customer(SECOND_VALID_CUSTOMER_HASH),
+            ),
+        ),
+    )
+    entry = FakeConfigEntry(SimpleNamespace(coordinator=coordinator))
+
+    diagnostics = await async_get_config_entry_diagnostics(cast("Any", FakeHass()), entry)
+    encoded = json.dumps(diagnostics, ensure_ascii=False, default=str)
+
+    assert diagnostics["config_entry"]["selected_customer_ids"] == [
+        VALID_CUSTOMER_HASH,
+        NUMERIC_VALID_CUSTOMER_HASH,
+        SECOND_VALID_CUSTOMER_HASH,
+    ]
+    assert UPPERCASE_CUSTOMER_HASH not in encoded
+    assert SHORT_CUSTOMER_HASH not in encoded
+    assert LONG_CUSTOMER_ID_SECRET not in encoded
+    assert CUSTOMER_SECRET not in encoded
+    assert "APT_SECRET_CANARY" not in encoded
+    assert "DONG_SECRET_CANARY" not in encoded
+    assert "HO_SECRET_CANARY" not in encoded
 
 
 @pytest.mark.asyncio
@@ -152,6 +195,7 @@ async def test_diagnostics_returns_whitelisted_summary_without_private_canaries(
             "account_type": "INDI",
             "polling_interval_hours": 12,
             "selected_customer_count": 1,
+            "selected_customer_ids": [],
         },
         "runtime": {
             "loaded": True,
@@ -238,6 +282,7 @@ async def test_diagnostics_handles_missing_or_malformed_runtime_safely() -> None
 
     assert diagnostics["runtime"]["loaded"] is True
     assert diagnostics["runtime"]["last_update_success"] is None
+    assert diagnostics["config_entry"]["selected_customer_ids"] == []
     assert diagnostics["availability"] == {"customers": 0, "bills": 0, "bill_errors": 0}
     assert TOKEN_SECRET not in encoded
     assert PASSWORD_SECRET not in encoded

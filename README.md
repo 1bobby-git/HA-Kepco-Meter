@@ -121,7 +121,7 @@ response_variable: kepco_history
 
 `config_entry_id`는 개발자 도구 > 액션 또는 자동화 시각 편집기에서 `config_entry_id` 선택기를 열고 KEPCO ON 항목을 선택하면 Home Assistant가 채웁니다. 수동 YAML에 넣어야 할 때는 선택기로 항목을 고른 뒤 YAML 보기로 전환해 생성된 ID를 복사하세요.
 
-`customer_id`는 원본 한전 고객번호가 아니라 통합이 생성한 64자 안정 해시 키입니다. 현재 액션 응답이나 진단 출력은 이 값을 공개 조회용으로 노출하지 않습니다. 안전한 확인 경로는 Settings > Devices & Services > Entities에서 KEPCO ON 센서 엔티티 설정을 열고 entity registry의 unique ID 앞 64자를 확인하는 것입니다. Home Assistant 화면에서 unique ID가 보이지 않는 환경에서는 재구성 화면의 고객 라벨과 엔티티 unique ID를 함께 대조해야 하며, 이 값 확인 UX는 현재 제한 사항입니다. 공개 이슈나 자동화 예제에는 원본 고객번호, 계약번호, 주소, 이름, 전화번호를 넣지 마세요.
+`customer_id`는 원본 한전 고객번호가 아니라 통합이 생성한 64자 안정 해시 키입니다. 가장 신뢰할 수 있는 확인 경로는 Settings > Devices & Services > KEPCO ON 항목 > 점 세 개 메뉴 > Download diagnostics에서 진단 파일을 내려받은 뒤 `selected_customer_ids` 값을 복사하는 것입니다. 이 값은 응답 액션에 필요한 안전 식별자이며 원본 한전 고객번호나 계약번호가 아닙니다. 그래도 공개 이슈나 자동화 예제에 올릴 필요는 없습니다. 진단 다운로드가 어려운 환경에서는 Settings > Devices & Services > Entities에서 KEPCO ON 센서 엔티티 설정을 열고 entity registry의 unique ID 앞 64자를 확인하는 방법을 fallback으로 사용할 수 있습니다.
 
 ## 자동화 예시
 

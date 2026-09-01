@@ -11,7 +11,7 @@ Turning `save_password` off omits only the password from the config entry. Refre
 | Config entry | Username, `save_password` flag, optional password, display name, account hash, selected customer hashes, selected raw customer and house contract IDs | Raw IDs are stored only because KEPCO ON bill requests require them. They are not used as entity IDs. |
 | Private Home Assistant Store | Refresh token, optional token, session identity fields, any proven cookie snapshot | Home Assistant Store files are not a secret vault. Backups can contain this data even when `save_password` is off. |
 | One-time handoff | Initial login session payload under `CONF_SESSION_HANDOFF` | Setup consumes this into Store and removes it from entry data. Code anchor: `__init__.py:81`, `__init__.py:97`. |
-| Diagnostics | Redacted summaries only | Secret canaries are covered by tests. |
+| Diagnostics | Redacted summaries plus selected 64-character customer hashes | Customer hashes are integration-generated stable identifiers for response actions, not raw KEPCO customer or contract numbers. Secret canaries are covered by tests. |
 
 ## Threat Boundaries
 
