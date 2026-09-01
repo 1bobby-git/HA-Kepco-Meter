@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime
 from types import MappingProxyType
+from typing import Any, cast
+
+from .const import (
+    CONF_CUSTOMERS,
+    CONF_SELECTED_CUSTOMERS,
+    DATA_APARTMENT_NAME,
+    DATA_CONTRACT_METHOD,
+    DATA_CUSTOMER_NUMBER,
+    DATA_DONG,
+    DATA_HO,
+    DATA_HOUSE_CONTRACT_NUMBER,
+    DATA_IS_SUPPORTED,
+    DATA_STABLE_KEY,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,7 +129,7 @@ class KepcoCustomerUpdateResult:
 
     customer: KepcoCustomer
     bill: KepcoBill | None
-    error: Exception | None = field(default=None, repr=False)
+    error_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -126,6 +140,8 @@ class KepcoCoordinatorData:
     bills_by_customer_key: Mapping[str, KepcoBill] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    errors_by_customer_key: Mapping[str, str] = field(default_factory=lambda: MappingProxyType({}))
+    last_success: datetime | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -133,6 +149,107 @@ class KepcoCoordinatorData:
             "bills_by_customer_key",
             MappingProxyType(dict(self.bills_by_customer_key)),
         )
+        object.__setattr__(
+            self,
+            "errors_by_customer_key",
+            MappingProxyType(dict(self.errors_by_customer_key)),
+        )
+        if self.last_success is None:
+            return
+        last_success = self.last_success
+        if last_success.tzinfo is None or last_success.utcoffset() is None:
+            last_success = last_success.replace(tzinfo=UTC)
+        object.__setattr__(self, "last_success", last_success.astimezone(UTC))
+
+
+def serialize_customer(customer: KepcoCustomer) -> dict[str, Any]:
+    """Serialize one selected customer for config-entry storage."""
+    return {
+        DATA_STABLE_KEY: customer.stable_key,
+        DATA_APARTMENT_NAME: customer.apartment_name,
+        DATA_DONG: customer.dong,
+        DATA_HO: customer.ho,
+        DATA_CONTRACT_METHOD: customer.contract_method,
+        DATA_IS_SUPPORTED: customer.is_supported,
+        DATA_CUSTOMER_NUMBER: customer.customer_number,
+        DATA_HOUSE_CONTRACT_NUMBER: customer.house_contract_number,
+    }
+
+
+def _require_nonempty_str(payload: Mapping[str, Any], key: str) -> str:
+    value = payload[key]
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"Invalid stored KEPCO ON customer field: {key}")
+    return value
+
+
+def deserialize_customer(payload: Mapping[str, Any]) -> KepcoCustomer:
+    """Deserialize one strict selected customer config payload."""
+    is_supported = payload[DATA_IS_SUPPORTED]
+    if not isinstance(is_supported, bool):
+        raise ValueError("Invalid stored KEPCO ON customer field: is_supported")
+    return KepcoCustomer(
+        stable_key=_require_nonempty_str(payload, DATA_STABLE_KEY),
+        apartment_name=_require_nonempty_str(payload, DATA_APARTMENT_NAME),
+        dong=_require_nonempty_str(payload, DATA_DONG),
+        ho=_require_nonempty_str(payload, DATA_HO),
+        contract_method=_require_nonempty_str(payload, DATA_CONTRACT_METHOD),
+        is_supported=is_supported,
+        _customer_number=_require_nonempty_str(payload, DATA_CUSTOMER_NUMBER),
+        _house_contract_number=_require_nonempty_str(payload, DATA_HOUSE_CONTRACT_NUMBER),
+    )
+
+
+def stored_customers(entry_data: Mapping[str, Any]) -> tuple[KepcoCustomer, ...] | None:
+    """Return strict selected customers from config-entry data, if valid."""
+    try:
+        customers = tuple(
+            deserialize_customer(cast("Mapping[str, Any]", payload))
+            for payload in entry_data.get(CONF_CUSTOMERS, [])
+        )
+    except KeyError, TypeError, ValueError:
+        return None
+    if not customers:
+        return None
+    return customers
+
+
+def validate_selected_keys(selected: object, available: Iterable[str]) -> list[str] | None:
+    """Validate selected customer keys against available customers."""
+    if not isinstance(selected, list) or not selected:
+        return None
+    available_set = set(available)
+    normalized = [str(value) for value in selected]
+    if len(set(normalized)) != len(normalized):
+        return None
+    if any(value not in available_set for value in normalized):
+        return None
+    return normalized
+
+
+def selected_customers(
+    customers: Sequence[KepcoCustomer], selected: Sequence[str]
+) -> tuple[KepcoCustomer, ...]:
+    """Return selected customers in selected-key order."""
+    by_key = {customer.stable_key: customer for customer in customers}
+    return tuple(by_key[key] for key in selected if key in by_key)
+
+
+def strict_selected_stored_customers(entry_data: Mapping[str, Any]) -> tuple[KepcoCustomer, ...]:
+    """Return selected customers from stored data or raise a safe value error."""
+    customers = stored_customers(entry_data)
+    if customers is None:
+        raise ValueError("Stored KEPCO ON customers are unavailable")
+    selected = validate_selected_keys(
+        entry_data.get(CONF_SELECTED_CUSTOMERS),
+        {customer.stable_key for customer in customers},
+    )
+    if selected is None:
+        raise ValueError("Stored KEPCO ON customer selection is invalid")
+    result = selected_customers(customers, selected)
+    if not result:
+        raise ValueError("Stored KEPCO ON customer selection is empty")
+    return result
 
 
 __all__ = [
@@ -144,4 +261,10 @@ __all__ = [
     "KepcoCustomer",
     "KepcoCustomerUpdateResult",
     "KepcoUsageHistoryPoint",
+    "deserialize_customer",
+    "selected_customers",
+    "serialize_customer",
+    "stored_customers",
+    "strict_selected_stored_customers",
+    "validate_selected_keys",
 ]

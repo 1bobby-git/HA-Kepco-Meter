@@ -7,7 +7,7 @@ import logging
 from collections.abc import Mapping
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
-from typing import Any, cast
+from typing import Any
 
 import voluptuous as vol
 from aiohttp import CookieJar
@@ -28,14 +28,6 @@ from .const import (
     CONF_SELECTED_CUSTOMERS,
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
-    DATA_APARTMENT_NAME,
-    DATA_CONTRACT_METHOD,
-    DATA_CUSTOMER_NUMBER,
-    DATA_DONG,
-    DATA_HO,
-    DATA_HOUSE_CONTRACT_NUMBER,
-    DATA_IS_SUPPORTED,
-    DATA_STABLE_KEY,
     DEFAULT_POLLING_INTERVAL_HOURS,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
@@ -54,7 +46,14 @@ from .exceptions import (
     KepcoOnRateLimitError,
     KepcoOnUnsupportedAccount,
 )
-from .models import KepcoAccountSession, KepcoCustomer
+from .models import (
+    KepcoAccountSession,
+    KepcoCustomer,
+    selected_customers,
+    serialize_customer,
+    stored_customers,
+    validate_selected_keys,
+)
 from .session_store import session_to_payload
 
 DEFAULT_TITLE = "한전ON"
@@ -100,42 +99,6 @@ class PendingConfig:
 
 def _account_uid_hash(user_id: str) -> str:
     return hashlib.sha256(f"kepco_on:{user_id.strip()}".encode()).hexdigest()
-
-
-def _serialize_customer(customer: KepcoCustomer) -> dict[str, Any]:
-    return {
-        DATA_STABLE_KEY: customer.stable_key,
-        DATA_APARTMENT_NAME: customer.apartment_name,
-        DATA_DONG: customer.dong,
-        DATA_HO: customer.ho,
-        DATA_CONTRACT_METHOD: customer.contract_method,
-        DATA_IS_SUPPORTED: customer.is_supported,
-        DATA_CUSTOMER_NUMBER: customer.customer_number,
-        DATA_HOUSE_CONTRACT_NUMBER: customer.house_contract_number,
-    }
-
-
-def _require_nonempty_str(payload: Mapping[str, Any], key: str) -> str:
-    value = payload[key]
-    if not isinstance(value, str) or not value:
-        raise ValueError(f"Invalid stored KEPCO ON customer field: {key}")
-    return value
-
-
-def _deserialize_customer(payload: Mapping[str, Any]) -> KepcoCustomer:
-    is_supported = payload[DATA_IS_SUPPORTED]
-    if not isinstance(is_supported, bool):
-        raise ValueError("Invalid stored KEPCO ON customer field: is_supported")
-    return KepcoCustomer(
-        stable_key=_require_nonempty_str(payload, DATA_STABLE_KEY),
-        apartment_name=_require_nonempty_str(payload, DATA_APARTMENT_NAME),
-        dong=_require_nonempty_str(payload, DATA_DONG),
-        ho=_require_nonempty_str(payload, DATA_HO),
-        contract_method=_require_nonempty_str(payload, DATA_CONTRACT_METHOD),
-        is_supported=is_supported,
-        _customer_number=_require_nonempty_str(payload, DATA_CUSTOMER_NUMBER),
-        _house_contract_number=_require_nonempty_str(payload, DATA_HOUSE_CONTRACT_NUMBER),
-    )
 
 
 def _customer_label(customer: KepcoCustomer) -> str:
@@ -199,38 +162,6 @@ def _map_error(err: Exception) -> str:
     return "unknown"
 
 
-def _stored_customers(entry_data: Mapping[str, Any]) -> tuple[KepcoCustomer, ...] | None:
-    try:
-        customers = tuple(
-            _deserialize_customer(cast("Mapping[str, Any]", payload))
-            for payload in entry_data.get(CONF_CUSTOMERS, [])
-        )
-    except KeyError, TypeError, ValueError:
-        return None
-    if not customers:
-        return None
-    return customers
-
-
-def _valid_selected(selected: object, available: set[str]) -> list[str] | None:
-    if not isinstance(selected, list) or not selected:
-        return None
-    normalized = [str(value) for value in selected]
-    if len(set(normalized)) != len(normalized):
-        return None
-    if any(value not in available for value in normalized):
-        return None
-    return normalized
-
-
-def _selected_customers(
-    customers: tuple[KepcoCustomer, ...], selected: list[str]
-) -> tuple[KepcoCustomer, ...]:
-    selected_set = set(selected)
-    by_key = {customer.stable_key: customer for customer in customers}
-    return tuple(by_key[key] for key in selected if key in selected_set)
-
-
 async def _close_session(client_session: Any | None) -> None:
     if client_session is not None and not getattr(client_session, "closed", False):
         try:
@@ -246,6 +177,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         self._pending: PendingConfig | None = None
+        self._reconfigure_customers: tuple[KepcoCustomer, ...] | None = None
 
     @callback
     def async_remove(self) -> None:
@@ -328,7 +260,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 step_id="customer",
                 data_schema=_customer_schema(self._pending.customers),
             )
-        selected = _valid_selected(user_input.get(CONF_SELECTED_CUSTOMERS), available)
+        selected = validate_selected_keys(user_input.get(CONF_SELECTED_CUSTOMERS), available)
         if selected is None:
             return self.async_show_form(
                 step_id="customer",
@@ -342,8 +274,8 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             CONF_SAVE_PASSWORD: pending.save_password,
             CONF_ACCOUNT_UID_HASH: pending.account_uid_hash,
             CONF_CUSTOMERS: [
-                _serialize_customer(customer)
-                for customer in _selected_customers(pending.customers, selected)
+                serialize_customer(customer)
+                for customer in selected_customers(pending.customers, selected)
             ],
             CONF_SELECTED_CUSTOMERS: selected,
             CONF_SESSION_HANDOFF: session_to_payload(pending.session),
@@ -427,7 +359,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         data = dict(entry.data)
         data[CONF_ACCOUNT_UID_HASH] = account_uid_hash
         data[CONF_CUSTOMERS] = [
-            _serialize_customer(customer) for customer in _selected_customers(customers, preserved)
+            serialize_customer(customer) for customer in selected_customers(customers, preserved)
         ]
         data[CONF_SELECTED_CUSTOMERS] = preserved
         data[CONF_SESSION_HANDOFF] = session_to_payload(session)
@@ -447,7 +379,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> config_entries.ConfigFlowResult:
         """Update customer selection for an existing entry."""
         entry = self._get_reconfigure_entry()
-        customers = _stored_customers(entry.data)
+        customers, refresh_error = await self._async_reconfigure_customers(entry)
         if customers is None:
             return self.async_abort(reason="no_customers")
         current = [str(value) for value in entry.data.get(CONF_SELECTED_CUSTOMERS, [])]
@@ -455,8 +387,9 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return self.async_show_form(
                 step_id="reconfigure",
                 data_schema=_customer_schema(customers, current),
+                errors={"base": refresh_error} if refresh_error is not None else None,
             )
-        selected = _valid_selected(
+        selected = validate_selected_keys(
             user_input.get(CONF_SELECTED_CUSTOMERS),
             {customer.stable_key for customer in customers},
         )
@@ -466,11 +399,42 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=_customer_schema(customers, current),
                 errors={"base": "invalid_selection"},
             )
+        data = dict(entry.data)
+        data[CONF_CUSTOMERS] = [
+            serialize_customer(customer) for customer in selected_customers(customers, selected)
+        ]
+        data[CONF_SELECTED_CUSTOMERS] = selected
         return self.async_update_reload_and_abort(
             entry,
-            data_updates={CONF_SELECTED_CUSTOMERS: selected},
+            data=data,
             reason="reconfigure_successful",
         )
+
+    async def _async_reconfigure_customers(
+        self,
+        entry: config_entries.ConfigEntry,
+    ) -> tuple[tuple[KepcoCustomer, ...] | None, str | None]:
+        """Return live customers when runtime is loaded, otherwise stored customers."""
+        if self._reconfigure_customers is not None:
+            return self._reconfigure_customers, None
+
+        runtime_data = getattr(entry, "runtime_data", None)
+        client = getattr(runtime_data, "client", None)
+        if client is not None:
+            try:
+                live_customers: tuple[KepcoCustomer, ...] = tuple(
+                    await client.async_get_customers()
+                )
+            except Exception as err:
+                return stored_customers(entry.data), _map_error(err)
+            if not live_customers:
+                return stored_customers(entry.data), "no_customers"
+            self._reconfigure_customers = live_customers
+            return live_customers, None
+
+        customers: tuple[KepcoCustomer, ...] | None = stored_customers(entry.data)
+        self._reconfigure_customers = customers
+        return customers, None
 
 
 class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):

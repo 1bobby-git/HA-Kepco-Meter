@@ -144,6 +144,7 @@ class FakeConfigEntry:
         self.update_listeners: list[Any] = []
         self.state = None
         self.source = "user"
+        self.runtime_data: Any = None
 
 
 class FakeSession:
@@ -946,6 +947,91 @@ async def test_reconfigure_updates_customer_selection_only() -> None:
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
     assert entry.unique_id == account_hash("SERVER_USER")
     assert fake_hass.config_entries.reloads == [entry.entry_id]
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_loaded_entry_uses_live_customers_and_persists_selected_only() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    entry.options = {OPT_POLLING_INTERVAL_HOURS: 12}
+    live_client = FakeClient(cast("Any", object()))
+    live_customers = (
+        customer("key-1"),
+        customer("key-3", apartment="새아파트"),
+    )
+    FakeClient.customer_results = [live_customers]
+    entry.runtime_data = type("Runtime", (), {"client": live_client})()
+    flow = KepcoOnConfigFlow()
+    fake_hass = attach_fake_hass(flow)
+    flow.handler = DOMAIN
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    shown = await flow.async_step_reconfigure()
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-3"]})
+
+    assert shown["type"] == "form"
+    assert result["type"] == "abort"
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-3"]
+    assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-3"]
+    rendered = json.dumps(entry.data, ensure_ascii=False)
+    assert "key-1" not in rendered
+    assert RAW_CUSTOMER_SECRET in rendered
+    assert "CUST2" not in rendered
+    assert entry.options == {OPT_POLLING_INTERVAL_HOURS: 12}
+    assert fake_hass.config_entries.reloads == [entry.entry_id]
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_live_refresh_error_allows_retry_with_safe_form_error() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    live_client = FakeClient(cast("Any", object()))
+    refreshed = (customer("key-1"), customer("key-2", apartment="별빛아파트"))
+    FakeClient.customer_results = [KepcoOnConnectionError(PASSWORD_SECRET), refreshed]
+    entry.runtime_data = type("Runtime", (), {"client": live_client})()
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.handler = DOMAIN
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    failed = await flow.async_step_reconfigure()
+    retried = await flow.async_step_reconfigure()
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-2"]})
+
+    assert failed["type"] == "form"
+    assert failed["errors"] == {"base": "cannot_connect"}
+    assert PASSWORD_SECRET not in repr(failed)
+    assert retried["type"] == "form"
+    assert result["type"] == "abort"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_unloaded_entry_falls_back_to_stored_selected_customers() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.handler = DOMAIN
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    shown = await flow.async_step_reconfigure()
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-2"]})
+
+    assert shown["type"] == "form"
+    assert result["type"] == "abort"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
+    assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-2"]
 
 
 @pytest.mark.asyncio
