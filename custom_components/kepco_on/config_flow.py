@@ -534,7 +534,12 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
             {
                 vol.Required(
                     OPT_POLLING_INTERVAL_HOURS,
-                    default=options.get(OPT_POLLING_INTERVAL_HOURS, DEFAULT_POLLING_INTERVAL_HOURS),
+                    default=str(
+                        options.get(
+                            OPT_POLLING_INTERVAL_HOURS,
+                            DEFAULT_POLLING_INTERVAL_HOURS,
+                        )
+                    ),
                 ): selector.SelectSelector(
                     selector.SelectSelectorConfig(
                         options=[str(value) for value in POLLING_INTERVAL_HOURS],
