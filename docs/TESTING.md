@@ -1,6 +1,6 @@
 # Testing and Release Verification
 
-This file separates checks already runnable in the repository from future live gates.
+This file separates checks already runnable in the repository from dated live evidence and future release gates.
 
 ## Local Windows Commands
 
@@ -68,7 +68,30 @@ hacs validate
 hassfest
 ```
 
-These were not completed for the current documentation task. Record the exact tool version and output when they are run.
+Record the exact tool version and output when these release gates are run for `v0.1.1`.
+
+## Dated Live Results
+
+Validated on HAOS 2026.8.3 on 2026-09-01:
+
+| Check | Result |
+| --- | --- |
+| Home Assistant config check | Passed |
+| Full Home Assistant Core restart | Passed |
+| Personal KEPCO ON login | Passed |
+| Supported apartment customer selection | Passed |
+| Current bill retrieval | Passed |
+| Original default sensors | Passed |
+| Detailed sensor option | Passed |
+| CO2 estimate option | Passed |
+| `kepco_on.get_monthly_bill` response action | Passed |
+| `kepco_on.get_usage_history` response action | Passed |
+| Full Core restart session recovery | Passed |
+| New `neighbor_usage_comparison` sensor on exact `v0.1.1` release deployment | Pending |
+| `kg CO₂` display on exact `v0.1.1` release deployment | Pending |
+| Controlled invalid-password live test | Not run to avoid account-lock risk |
+
+The live result record must not include usernames, raw customer or contract numbers, derived stable keys, addresses, bill values, tokens, cookies, or passwords.
 
 ## Home Assistant Live Smoke Checklist
 
@@ -89,14 +112,14 @@ Run on the target HAOS instance only after confirming its current version, confi
 - Restart Home Assistant and verify session recovery or reauth behavior.
 - Download diagnostics and scan for credential/customer canaries.
 
-This live smoke checklist has not yet been run for final release evidence.
+For `v0.1.1`, repeat the checklist against the exact released package before marking HACS update and release deployment complete. The 2026-09-01 live run proves the existing HAOS path through restart recovery, but the new comparison sensor and `kg CO₂` rendering remain pending until the exact `v0.1.1` release is deployed.
 
 ## Privacy Scan
 
 Before publishing a release or issue artifact:
 
 ```powershell
-rg -n "userId|pwdVal|refreshToken|JSESSIONID|kepcoSSO|CUST_NO|SI_CUST_NO|custNo|housCntrNo" README.md docs tools
+rg -n "userId|pwdVal|refreshToken|JSESSIONID|WMONID|kepcoSSO|CUST_NO|SI_CUST_NO|custNo|housCntrNo" README.md docs tools -g "!docs/superpowers/**"
 git diff --check
 git status --short
 ```

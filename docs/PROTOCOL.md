@@ -3,40 +3,29 @@
 This document records the protocol evidence used by the integration without committing raw KEPCO ON captures.
 
 Document review date: 2026-09-01
-Integration version: `0.1.0`
+Integration version: `0.1.1`
 
 ## Evidence Baseline
 
 | Evidence | Status | Details |
 | --- | --- | --- |
-| Endpoint inventory | Confirmed safe artifact, not committed raw | SHA-256 `9ab036e15bd80e018a923cf9ca9250067cf3b2a911248d88ad2a8fdff940558b`; 4,052 bytes; 50 nonblank lines. |
-| Safe wire capture | Confirmed safe artifact, not committed raw | SHA-256 `cdd9f5f7443781e2986484cd030e5b95d9d89ae764a5ee2e759d144c2459620a`; 20,826,701 bytes; 611 records. |
-| Public WebSquare XML/JS | Confirmed HTTP 200 on 2026-08-31 | `https://online.kepco.co.kr/MEM001D01.xml` Last-Modified 2026-07-28; `https://online.kepco.co.kr/MYM001D00.xml` Last-Modified 2026-07-29; commonAPI, commonGlobal, commonScope, commonUtil fetched 200. |
+| Endpoint inventory | Confirmed safe artifact, not committed raw | Safe endpoint inventory was reviewed without committing raw captures or stable digest values. |
+| Safe wire capture | Confirmed safe artifact, not committed raw | Safe wire metadata was reviewed without committing raw payloads, headers, cookie values, customer identifiers, bill values, or stable digest values. |
+| Public WebSquare XML/JS | Confirmed HTTP 200 on 2026-08-31 | Static XML paths include `/ui/me/login/indi/MEM001D01.xml` and `/ui/my/indi/MYM001D00.xml`; commonAPI, commonGlobal, commonScope, and commonUtil fetched 200. |
+| Live HAOS smoke | Passed on 2026-09-01 | HAOS 2026.8.3 config check, full Core restart, personal login, customer selection, current bill retrieval, both response actions, detailed option, CO2 option, and restart recovery passed. |
 
-Raw endpoint and wire artifacts are intentionally untracked. Recompute their hashes from a local capture path when auditing:
-
-```powershell
-Get-FileHash -Algorithm SHA256 <path-to-kepco-on-endpoints.txt>
-Get-FileHash -Algorithm SHA256 <path-to-kepco-on-wire.safe.jsonl>
-(Get-Content <path-to-kepco-on-endpoints.txt> | Where-Object { $_.Trim() }).Count
-(Get-Item <path-to-kepco-on-wire.safe.jsonl>).Length
-```
-
-```bash
-sha256sum <path-to-kepco-on-endpoints.txt> <path-to-kepco-on-wire.safe.jsonl>
-grep -cve '^[[:space:]]*$' <path-to-kepco-on-endpoints.txt>
-wc -c <path-to-kepco-on-wire.safe.jsonl>
-```
+Raw endpoint and wire artifacts are intentionally untracked. Do not publish raw captures, cookies, tokens, customer identifiers, account identifiers, bill values, or digest values derived from private captures.
 
 ## Confirmed vs Unconfirmed
 
 | Area | Confirmed | Not Yet Proven Live |
 | --- | --- | --- |
-| Login request | `/cyb/me/login/indi/api` receives `userId`, `pwdVal`, `autoFlag: "N"` and submission id `mf_login_popup_wframe_sbm_submission4`. Code anchor: `custom_components/kepco_on/auth.py` `KepcoOnAuth._async_login_unlocked`; endpoint constant in `custom_components/kepco_on/const.py`. | Exact bad-password response body and all conditional challenge variants. |
+| Login bootstrap | Fixed HTTPS GET `https://online.kepco.co.kr/MYM001D00` with redirects disabled. HTTP 200 is required. Empty body and empty or missing content type are allowed. Response size is bounded. Observed cookie names include `JSESSIONID` and `WMONID`, but no cookie name is required for success and bootstrap cookies are not persisted. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnTransport.async_prepare_login_session`. | Long-idle token lifetime remains untested. |
+| Login request | `/cyb/me/login/indi/api` receives a credential-bearing JSON object wrapped under `dma_loginData`, with `userId`, `pwdVal`, `autoFlag: "N"` and submission id `mf_login_popup_wframe_sbm_submission4`. The response is read from `dma_loginData2` when present, and one bounded same-session retry is allowed only for an empty object response. The User-Agent is `HomeAssistant-KEPCO-ON/0.1.1`. Code anchor: `custom_components/kepco_on/auth.py` `KepcoOnAuth._async_login_unlocked`; endpoint constant in `custom_components/kepco_on/const.py`. | Controlled invalid-password live test was not run to avoid account-lock risk. Conditional challenge variants remain untested. |
 | First-login check | `/me/login/firstLogin/check` exists in capture and tool scope. Code anchor: endpoint constant in `custom_components/kepco_on/const.py`. | Whether billing requires this endpoint in every fresh account/session case. |
 | Session validation | `/sessionCheck` sends `refreshToken`, `userId`, `mbrsNm` and rotates token fields when `result` is true. Code anchor: `custom_components/kepco_on/auth.py` `KepcoOnAuth.async_validate_session`. | Token lifetime and restart behavior after long idle periods. |
 | SSO check | `/ssoCheck` sends `userId`, `userMngSeqno`, `name`, `autoLogin: "Y"` and expects `loginChk: "Y"`. Code anchor: `custom_components/kepco_on/auth.py` `KepcoOnAuth.async_sso_check`. | Whether every deployment needs SSO check before protected requests. |
-| Cookies | Candidate names are `JSESSIONID` and `kepcoSSO`; persisted allowlist is empty. Code anchor: `custom_components/kepco_on/const.py` `CANDIDATE_COOKIE_NAMES` and `PERSISTED_COOKIE_ALLOWLIST`. | Minimum cookie allowlist for durable restart recovery. |
+| Cookies | Live bootstrap observed `JSESSIONID` and `WMONID`. The current persisted cookie allowlist is empty, so restart recovery does not depend on committed cookie values. Code anchor: `custom_components/kepco_on/const.py` `PERSISTED_COOKIE_ALLOWLIST`. | Whether future KEPCO changes require a persisted cookie allowlist. |
 | Account type | `/isCorp` returns `userClNm`; only `INDI` is accepted. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnClient.async_get_account_type`. | Behavior of non-INDI accounts beyond safe rejection. |
 | Customer list | `/my/indi/info/myPageCustNoList` uses the 12-key `dma_search` body below. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnClient.async_get_customers` with submission id `mf_wfm_layout_sbm_myPageCustList`. | Empty `myPage` result behavior from a real account. |
 | Bill detail | `/my/charge/pay/aptBillDetail` uses latest empty month or explicit `YYYYMM`. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnClient.async_get_bill` with submission id `mf_wfm_layout_sbm_search`. | Month availability outside tested recent cases. |
@@ -47,8 +36,9 @@ wc -c <path-to-kepco-on-wire.safe.jsonl>
 
 | Resource | URL | Fetch Date | HTTP Result | Last-Modified |
 | --- | --- | --- | --- | --- |
-| Login page definition | `https://online.kepco.co.kr/MEM001D01.xml` | 2026-08-31 | 200 | 2026-07-28 |
-| My page definition | `https://online.kepco.co.kr/MYM001D00.xml` | 2026-08-31 | 200 | 2026-07-29 |
+| Login page definition | `https://online.kepco.co.kr/ui/me/login/indi/MEM001D01.xml` | 2026-08-31 | 200 | 2026-07-28 |
+| My page definition | `https://online.kepco.co.kr/ui/my/indi/MYM001D00.xml` | 2026-08-31 | 200 | 2026-07-29 |
+| Apartment bill page definition | `https://online.kepco.co.kr/ui/my/charge/MYM053D50.xml` | 2026-09-01 | 200 | Not recorded in committed files |
 | Common API script | `https://online.kepco.co.kr/commonAPI.js` | 2026-08-31 | 200 | Not recorded in committed files |
 | Common global script | `https://online.kepco.co.kr/commonGlobal.js` | 2026-08-31 | 200 | Not recorded in committed files |
 | Common scope script | `https://online.kepco.co.kr/commonScope.js` | 2026-08-31 | 200 | Not recorded in committed files |
@@ -58,7 +48,8 @@ wc -c <path-to-kepco-on-wire.safe.jsonl>
 
 | Endpoint | Method | Submission ID | Body |
 | --- | --- | --- | --- |
-| `/cyb/me/login/indi/api` | POST | `mf_login_popup_wframe_sbm_submission4` | `userId`, `pwdVal`, `autoFlag: "N"` |
+| `https://online.kepco.co.kr/MYM001D00` | GET | None | Credential-free bootstrap; redirects disabled; HTTP 200 required; empty body/content type allowed; response size bounded |
+| `/cyb/me/login/indi/api` | POST | `mf_login_popup_wframe_sbm_submission4` | `dma_loginData` object containing `userId`, `pwdVal`, `autoFlag: "N"` |
 | `/sessionCheck` | POST | None | `refreshToken`, `userId`, `mbrsNm` |
 | `/ssoCheck` | POST | None | `userId`, `userMngSeqno`, `name`, `autoLogin: "Y"` |
 | `/isCorp` | POST | None | No JSON body |
@@ -71,15 +62,15 @@ wc -c <path-to-kepco-on-wire.safe.jsonl>
 
 | Response | Used Keys |
 | --- | --- |
-| Login | `result`, `errorCode`, `errorMessage`, `token`, `refreshToken`, `userId`, `mbrsNm`, `movePage`, `serviceMode`, `pwdUpdFlag`, `frstLoginTF`, `pwdUp`, optional `userMngSeqno` |
+| Login | `dma_loginData2` wrapper when present; used keys are `result`, `errorCode`, `errorMessage`, `token`, `refreshToken`, `userId`, `mbrsNm`, `movePage`, `serviceMode`, `pwdUpdFlag`, `frstLoginTF`, `pwdUp`, optional `userMngSeqno` |
 | Session check | `result`, `token`, `refreshToken`, `userId`, `mbrsNm`, optional `userMngSeqno` |
 | SSO check | `loginChk`, optional `refreshToken` |
 | Account type | `userClNm` |
 | Customer list | Apartment/officetel rows parsed into apartment name, dong, ho, contract method, customer number, house contract number, support flag |
-| Bill detail | Effective month, server bill month, usage period, current/previous meter readings, usage comparisons, amount due, charge breakdown, ordered monthly history |
+| Bill detail | Effective month, server bill month, usage period, current/previous meter readings, usage comparisons, neighbor comparison fields from `/ui/my/charge/MYM053D50.xml`, amount due, charge breakdown, ordered monthly history |
 
 No raw response body, request body, header set, cookie value, HAR, trace, or screenshot is committed.
 
 ## Runtime Limitations
 
-The integration has not yet completed final live Home Assistant OS installation, Hassfest, HACS install, restart recovery, or release packaging verification. Public docs and code must not state those gates as complete until new evidence exists.
+Live HAOS validation on 2026-09-01 passed for login, customer selection, current bill retrieval, response actions, detailed sensors, CO2 option, and full restart recovery. The controlled invalid-password live branch and long-idle token lifetime remain untested. Public `v0.1.1` tag, GitHub release, HACS update flow, and exact-release deployment proof are still pending.
