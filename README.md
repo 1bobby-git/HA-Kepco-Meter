@@ -32,7 +32,7 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 2. 자동 재인증이 필요하면 `비밀번호 저장`을 켭니다.
 3. 조회할 아파트 세대를 선택합니다. 선택 화면에는 개인정보 보호를 위해 아파트명, 동, 호만 표시됩니다.
 
-`비밀번호 저장`을 끄면 Config Entry에는 비밀번호만 저장하지 않습니다. 다만 재시작/세션 복구를 위해 refresh token, 세션 식별 정보, 그리고 라이브 검증으로 필요성이 입증된 쿠키 스냅샷은 private Home Assistant Store에 저장될 수 있습니다. 만료되면 재인증이 필요할 수 있습니다.
+`비밀번호 저장`을 끄면 비밀번호는 저장하지 않습니다. 재시작/세션 복구를 위해 refresh token과 최소 세션 식별 정보는 private Home Assistant Store에 저장됩니다. `0.1.1`의 `PERSISTED_COOKIE_ALLOWLIST`는 비어 있으므로 `JSESSIONID`와 `WMONID` 값은 저장하지 않습니다. 저장된 세션이 만료되면 재인증이 필요할 수 있습니다.
 
 이 통합은 Config Entry, Store, 백업을 자체 암호화하지 않습니다. 비밀번호 저장 여부와 관계없이 Home Assistant 호스트, `.storage`, 백업 파일을 비밀 저장소처럼 보호하세요.
 
@@ -152,12 +152,12 @@ actions:
 ## 문제 해결
 
 - 로그인 실패: 한전ON 웹에서 같은 계정으로 직접 로그인되는지 확인합니다. CAPTCHA, MFA, OACX 등 조건부 챌린지가 나오면 이 통합은 우회하지 않습니다.
-- 세션 만료: 비밀번호 저장을 껐거나 저장된 refresh token/session/cookie가 만료되면 재인증이 필요합니다.
+- 세션 만료: 비밀번호 저장을 껐거나 저장된 refresh token/session이 만료되면 재인증이 필요합니다. `0.1.1`은 `JSESSIONID`/`WMONID` 값을 저장하지 않습니다.
 - 고객 없음: 이 통합은 개인 아파트 세대 계약만 지원합니다.
 - 일부 세대만 unavailable: 한 세대의 청구 조회 실패는 다른 세대 센서와 분리됩니다.
 - 월 조회 실패: 응답 액션의 `month`는 `YYYYMM`이고 현재월보다 미래이거나 최근 24개월 범위 밖이면 거절됩니다.
 - 프로토콜 변경 수리 이슈: 한전ON 응답 구조가 바뀌면 원본 응답 없이 안전한 오류 분류만 수리 이슈로 표시됩니다.
-- `login bootstrap content type changed`가 보이는 경우: 기존 `v0.1.0` 또는 오래된 설치본에서 로그인 bootstrap 응답을 지나치게 엄격하게 검사했을 수 있습니다. HACS에서 업데이트한 뒤 Home Assistant를 완전히 재시작하고, 설치된 통합 버전이 `0.1.1`인지 확인한 다음 다시 설정하세요.
+- `login bootstrap content type changed`가 보이는 경우: 기존 `v0.1.0` 또는 오래된 설치본에서 로그인 bootstrap 응답을 지나치게 엄격하게 검사했을 수 있습니다. 공개 `v0.1.1` 릴리스 전에는 이 소스/체크아웃을 수동 설치해야 `0.1.1` 동작을 테스트할 수 있습니다. 공개 `v0.1.1` 릴리스 후에는 HACS에서 업데이트한 뒤 Home Assistant를 완전히 재시작하고, 설치된 통합 버전이 `0.1.1`인지 확인한 다음 다시 설정하세요.
 
 설치된 매니페스트 버전 확인:
 
@@ -168,7 +168,7 @@ cat /config/custom_components/kepco_on/manifest.json
 과거 로그인 bootstrap 오류 검색:
 
 ```bash
-grep -R "login bootstrap content type changed" /config/home-assistant.log /config/home-assistant.log.1
+grep -F "login bootstrap content type changed" /config/home-assistant.log* 2>/dev/null
 ```
 
 문제가 계속되면 공개 이슈에는 비밀번호, 쿠키, 토큰, 원본 고객번호, 계약번호, HAR, raw capture를 올리지 마세요. 공유 가능한 자료는 검토 후 민감값을 지운 로그와 `login-schema.safe.json`뿐입니다.
