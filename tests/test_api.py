@@ -136,6 +136,66 @@ def reset_sleep_calls() -> None:
 
 
 @pytest.mark.asyncio
+async def test_transport_prepares_login_session_with_fixed_safe_get() -> None:
+    captured: dict[str, object] = {}
+
+    async def route(request: web.Request) -> Response:
+        captured["method"] = request.method
+        captured["path"] = request.path
+        captured["headers"] = dict(request.headers)
+        return Response(text="<html>KEPCO ON</html>", content_type="text/html")
+
+    server = ResponsesMockServer()
+    server.add(HOST, "/MYM001D00", "get", response=route)
+
+    await with_transport(lambda transport: transport.async_prepare_login_session(), server)
+
+    headers = cast("dict[str, str]", captured["headers"])
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/MYM001D00"
+    assert headers["Accept"] == "text/html,application/xhtml+xml"
+    assert headers["Referer"] == ORIGIN
+    assert "submissionid" not in headers
+    assert "refreshToken" not in headers
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("response", "error_type"),
+    [
+        (Response(text="error", status=500, content_type="text/html"), KepcoOnConnectionError),
+        (Response(text="{}", content_type="application/json"), KepcoOnProtocolError),
+    ],
+)
+async def test_transport_rejects_invalid_login_bootstrap_response(
+    response: Response,
+    error_type: type[Exception],
+) -> None:
+    server = ResponsesMockServer()
+    server.add(HOST, "/MYM001D00", "get", response=response)
+
+    with pytest.raises(error_type):
+        await with_transport(lambda transport: transport.async_prepare_login_session(), server)
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_oversized_login_bootstrap_response(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(kepco_api, "MAX_RESPONSE_BYTES", 10)
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/MYM001D00",
+        "get",
+        response=Response(text="x" * 11, content_type="text/html"),
+    )
+
+    with pytest.raises(KepcoOnProtocolError):
+        await with_transport(lambda transport: transport.async_prepare_login_session(), server)
+
+
+@pytest.mark.asyncio
 async def test_transport_posts_json_headers_to_allowlisted_kepco_path() -> None:
     captured: dict[str, object] = {}
 
