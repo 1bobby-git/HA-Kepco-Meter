@@ -173,6 +173,41 @@ async def test_login_posts_exact_body_headers_and_saves_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_login_retries_one_empty_cold_session_response() -> None:
+    attempts = 0
+
+    async def route(request: web.Request) -> Response:
+        nonlocal attempts
+        attempts += 1
+        assert await request_json(request) == {
+            "userId": USERNAME_SECRET.strip(),
+            "pwdVal": PASSWORD_SECRET,
+            "autoFlag": "N",
+        }
+        if attempts == 1:
+            return json_response({})
+        return json_response(
+            {
+                "result": "YES",
+                "token": "TOKEN_SECRET_CANARY",
+                "refreshToken": REFRESH_SECRET,
+                "userId": "USER_ID_SECRET_CANARY",
+                "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+            }
+        )
+
+    server = ResponsesMockServer()
+    server.add(HOST, "/cyb/me/login/indi/api", "post", response=route, repeat=2)
+    store = MemorySessionStore()
+    async with auth_context(server, store) as auth:
+        session = await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+
+    assert attempts == 2
+    assert session.refresh_token == REFRESH_SECRET
+    assert store.saved == [session]
+
+
+@pytest.mark.asyncio
 async def test_login_result_no_raises_safe_auth_error() -> None:
     server = ResponsesMockServer()
     server.add(

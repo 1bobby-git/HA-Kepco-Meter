@@ -242,11 +242,22 @@ class KepcoOnAuth:
             raise KepcoOnAuthError("KEPCO ON username is required to authenticate")
         if not password.strip():
             raise KepcoOnAuthError("KEPCO ON password is required to authenticate")
+        login_payload: JsonObject = {
+            "userId": trimmed_username,
+            "pwdVal": password,
+            "autoFlag": "N",
+        }
         payload = await self._transport.request_json(
             ENDPOINT_LOGIN_INDI,
-            {"userId": trimmed_username, "pwdVal": password, "autoFlag": "N"},
+            login_payload,
             submission_id="mf_login_popup_wframe_sbm_submission4",
         )
+        if not payload:
+            payload = await self._transport.request_json(
+                ENDPOINT_LOGIN_INDI,
+                login_payload,
+                submission_id="mf_login_popup_wframe_sbm_submission4",
+            )
         if payload.get("result") == "NO":
             raise KepcoOnAuthError("KEPCO ON authentication failed")
         try:
