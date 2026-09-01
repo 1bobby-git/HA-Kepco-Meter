@@ -25,6 +25,7 @@ from custom_components.kepco_on.models import (
 )
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfEnergy
+from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW_CUSTOMER_SECRET = "RAW_CUST_1234567890"
@@ -63,9 +64,18 @@ class FakeEntityRegistry:
     def __init__(self, entries: list[SimpleNamespace]) -> None:
         self.entries = entries
         self.removed: list[str] = []
+        self.updated: list[tuple[str, RegistryEntryDisabler | None]] = []
 
     def async_remove(self, entity_id: str) -> None:
         self.removed.append(entity_id)
+
+    def async_update_entity(
+        self,
+        entity_id: str,
+        *,
+        disabled_by: RegistryEntryDisabler | None,
+    ) -> None:
+        self.updated.append((entity_id, disabled_by))
 
 
 class FakeDeviceRegistry:
@@ -201,6 +211,24 @@ async def setup_entities(
     return entities
 
 
+def entity_entry(
+    entity_id: str,
+    unique_id: str,
+    *,
+    platform: str = DOMAIN,
+    config_entry_id: str = "entry-1",
+    disabled_by: RegistryEntryDisabler | None = None,
+) -> SimpleNamespace:
+    """Return a registry entry fake."""
+    return SimpleNamespace(
+        entity_id=entity_id,
+        unique_id=unique_id,
+        platform=platform,
+        config_entry_id=config_entry_id,
+        disabled_by=disabled_by,
+    )
+
+
 def by_key(entities: list[Any]) -> dict[str, Any]:
     """Return entities keyed by sensor description key."""
     return {entity.entity_description.key: entity for entity in entities}
@@ -252,6 +280,7 @@ async def test_default_sensors_have_exact_count_metadata_values_and_privacy() ->
         assert entity.entity_description.entity_registry_enabled_default is (key in default_enabled)
         assert entity.device_info == {
             "identifiers": {(DOMAIN, "cust-a")},
+            "name": "한전ON 전기요금 101동 1001호",
             "manufacturer": "한국전력공사(KEPCO)",
             "model": "한전ON 아파트 세대요금",
             "configuration_url": PAGE_URL,
@@ -335,6 +364,41 @@ async def test_multiple_customers_and_partial_failure_availability_are_isolated(
 
 
 @pytest.mark.asyncio
+async def test_multiple_customer_device_names_are_distinct_and_privacy_safe() -> None:
+    customers = (
+        customer("cust-a"),
+        KepcoCustomer(
+            stable_key="cust-b",
+            apartment_name="비밀아파트",
+            dong="202",
+            ho="0304",
+            contract_method="아파트(단일계약)",
+            is_supported=True,
+            _customer_number=f"{RAW_CUSTOMER_SECRET}_b",
+            _house_contract_number=f"{RAW_HOUSE_SECRET}_b",
+        ),
+    )
+    entities = await setup_entities(
+        customers=customers,
+        bills_by_customer_key={"cust-a": bill(), "cust-b": bill()},
+    )
+    device_names = {
+        entity.device_info["name"]
+        for entity in entities
+        if entity.entity_description.key == "monthly_usage"
+    }
+
+    assert device_names == {
+        "한전ON 전기요금 101동 1001호",
+        "한전ON 전기요금 202동 0304호",
+    }
+    rendered = repr([entity.device_info for entity in entities])
+    assert RAW_CUSTOMER_SECRET not in rendered
+    assert RAW_HOUSE_SECRET not in rendered
+    assert RAW_NAME_SECRET not in rendered
+
+
+@pytest.mark.asyncio
 async def test_co2_sensor_is_optional_estimated_and_decimal_rounded() -> None:
     assert "co2_estimate" not in by_key(await setup_entities())
 
@@ -373,22 +437,17 @@ async def test_setup_removes_only_stale_entities_and_solely_owned_devices(
     sensor_any = cast("Any", sensor_module)
     entity_registry = FakeEntityRegistry(
         [
-            SimpleNamespace(
+            entity_entry(
                 entity_id="sensor.stale_monthly_usage",
                 unique_id="stale_monthly_usage",
-                domain="sensor",
-                platform=DOMAIN,
             ),
-            SimpleNamespace(
+            entity_entry(
                 entity_id="sensor.cust_a_monthly_usage",
                 unique_id="cust-a_monthly_usage",
-                domain="sensor",
-                platform=DOMAIN,
             ),
-            SimpleNamespace(
+            entity_entry(
                 entity_id="sensor.other_domain",
                 unique_id="stale_monthly_usage",
-                domain="sensor",
                 platform="other",
             ),
         ]
@@ -425,6 +484,168 @@ async def test_setup_removes_only_stale_entities_and_solely_owned_devices(
 
     assert entity_registry.removed == ["sensor.stale_monthly_usage"]
     assert device_registry.removed == ["device-stale"]
+
+
+@pytest.mark.asyncio
+async def test_setup_option_true_reenables_only_integration_disabled_detailed_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    sensor_any = cast("Any", sensor_module)
+    entity_registry = FakeEntityRegistry(
+        [
+            entity_entry(
+                "sensor.cust_a_previous_meter_reading",
+                "cust-a_previous_meter_reading",
+                disabled_by=RegistryEntryDisabler.INTEGRATION,
+            ),
+            entity_entry(
+                "sensor.cust_a_base_charge",
+                "cust-a_base_charge",
+                disabled_by=RegistryEntryDisabler.USER,
+            ),
+            entity_entry(
+                "sensor.cust_a_monthly_usage",
+                "cust-a_monthly_usage",
+                disabled_by=RegistryEntryDisabler.INTEGRATION,
+            ),
+            entity_entry(
+                "sensor.other_platform_previous_meter_reading",
+                "cust-a_previous_meter_reading",
+                platform="other",
+                disabled_by=RegistryEntryDisabler.INTEGRATION,
+            ),
+            entity_entry(
+                "sensor.other_entry_previous_meter_reading",
+                "cust-a_previous_meter_reading",
+                config_entry_id="entry-2",
+                disabled_by=RegistryEntryDisabler.INTEGRATION,
+            ),
+        ]
+    )
+    device_registry = FakeDeviceRegistry([])
+    monkeypatch.setattr(sensor_any.er, "async_get", lambda hass: entity_registry)
+    monkeypatch.setattr(
+        sensor_any.er, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+    monkeypatch.setattr(sensor_any.dr, "async_get", lambda hass: device_registry)
+    monkeypatch.setattr(
+        sensor_any.dr, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+
+    await setup_entities(
+        options={OPT_ENABLE_DETAILED_SENSORS: True},
+        use_real_registry_cleanup=True,
+    )
+
+    assert entity_registry.updated == [("sensor.cust_a_previous_meter_reading", None)]
+    assert entity_registry.removed == []
+
+
+@pytest.mark.asyncio
+async def test_setup_option_false_keeps_manual_detailed_registry_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    sensor_any = cast("Any", sensor_module)
+    entity_registry = FakeEntityRegistry(
+        [
+            entity_entry("sensor.cust_a_base_charge", "cust-a_base_charge"),
+            entity_entry(
+                "sensor.cust_a_vat",
+                "cust-a_vat",
+                disabled_by=RegistryEntryDisabler.USER,
+            ),
+        ]
+    )
+    device_registry = FakeDeviceRegistry([])
+    monkeypatch.setattr(sensor_any.er, "async_get", lambda hass: entity_registry)
+    monkeypatch.setattr(
+        sensor_any.er, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+    monkeypatch.setattr(sensor_any.dr, "async_get", lambda hass: device_registry)
+    monkeypatch.setattr(
+        sensor_any.dr, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+
+    await setup_entities(use_real_registry_cleanup=True)
+
+    assert entity_registry.updated == []
+    assert entity_registry.removed == []
+
+
+@pytest.mark.asyncio
+async def test_setup_co2_toggle_off_removes_only_this_entry_co2_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    sensor_any = cast("Any", sensor_module)
+    entity_registry = FakeEntityRegistry(
+        [
+            entity_entry("sensor.cust_a_co2_estimate", "cust-a_co2_estimate"),
+            entity_entry("sensor.cust_a_monthly_usage", "cust-a_monthly_usage"),
+            entity_entry("sensor.cust_a_base_charge", "cust-a_base_charge"),
+            entity_entry(
+                "sensor.other_entry_co2_estimate",
+                "cust-a_co2_estimate",
+                config_entry_id="entry-2",
+            ),
+            entity_entry(
+                "sensor.other_platform_co2_estimate",
+                "cust-a_co2_estimate",
+                platform="other",
+            ),
+        ]
+    )
+    device_registry = FakeDeviceRegistry([])
+    monkeypatch.setattr(sensor_any.er, "async_get", lambda hass: entity_registry)
+    monkeypatch.setattr(
+        sensor_any.er, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+    monkeypatch.setattr(sensor_any.dr, "async_get", lambda hass: device_registry)
+    monkeypatch.setattr(
+        sensor_any.dr, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+
+    entities = await setup_entities(
+        options={OPT_ENABLE_CO2_ESTIMATE: False},
+        use_real_registry_cleanup=True,
+    )
+
+    assert entity_registry.removed == ["sensor.cust_a_co2_estimate"]
+    assert "co2_estimate" not in by_key(entities)
+
+
+@pytest.mark.asyncio
+async def test_setup_co2_toggle_on_keeps_registry_and_creates_entity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    sensor_any = cast("Any", sensor_module)
+    entity_registry = FakeEntityRegistry(
+        [entity_entry("sensor.cust_a_co2_estimate", "cust-a_co2_estimate")]
+    )
+    device_registry = FakeDeviceRegistry([])
+    monkeypatch.setattr(sensor_any.er, "async_get", lambda hass: entity_registry)
+    monkeypatch.setattr(
+        sensor_any.er, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+    monkeypatch.setattr(sensor_any.dr, "async_get", lambda hass: device_registry)
+    monkeypatch.setattr(
+        sensor_any.dr, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+
+    entities = await setup_entities(
+        options={OPT_ENABLE_CO2_ESTIMATE: True, OPT_CO2_FACTOR_KG_PER_KWH: "0.459"},
+        use_real_registry_cleanup=True,
+    )
+
+    assert entity_registry.removed == []
+    assert by_key(entities)["co2_estimate"].native_value == 263
 
 
 @pytest.mark.asyncio

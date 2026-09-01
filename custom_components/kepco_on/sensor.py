@@ -20,6 +20,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_registry import RegistryEntry, RegistryEntryDisabler
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import KepcoOnConfigEntry
@@ -237,6 +238,18 @@ CO2_SENSOR_DESCRIPTION = KepcoSensorEntityDescription(
     native_unit_of_measurement="kg",
     value_fn=_co2_estimate,
 )
+DETAIL_SENSOR_KEYS = frozenset(description.key for description in DETAIL_SENSOR_DESCRIPTIONS)
+SENSOR_DESCRIPTION_KEYS = tuple(
+    sorted(
+        (
+            *(description.key for description in DEFAULT_SENSOR_DESCRIPTIONS),
+            *DETAIL_SENSOR_KEYS,
+            CO2_SENSOR_DESCRIPTION.key,
+        ),
+        key=len,
+        reverse=True,
+    )
+)
 
 
 def _description_with_enabled_default(
@@ -305,6 +318,7 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         self._attr_unique_id = f"{customer.stable_key}_{description.key}"
         self._attr_device_info = {
             "identifiers": {(DOMAIN, customer.stable_key)},
+            "name": f"한전ON 전기요금 {customer.dong}동 {customer.ho}호",
             "manufacturer": "한국전력공사(KEPCO)",
             "model": "한전ON 아파트 세대요금",
             "configuration_url": PAGE_URL,
@@ -350,14 +364,28 @@ async def _async_remove_stale_registry_entries(
 ) -> None:
     """Remove stale entities/devices for customers no longer selected."""
     selected_keys = {customer.stable_key for customer in customers}
+    detailed_enabled = bool(entry.options.get(OPT_ENABLE_DETAILED_SENSORS, False))
+    co2_enabled = bool(entry.options.get(OPT_ENABLE_CO2_ESTIMATE, False))
     entity_registry = er.async_get(hass)
     for registry_entry in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
-        if registry_entry.platform != DOMAIN:
+        if not _is_this_entry_domain_entity(registry_entry, entry.entry_id):
             continue
         customer_key = _customer_key_from_unique_id(registry_entry.unique_id)
-        if customer_key is None or customer_key in selected_keys:
+        if customer_key is None:
             continue
-        entity_registry.async_remove(registry_entry.entity_id)
+        if _is_description_unique_id(registry_entry.unique_id, CO2_SENSOR_DESCRIPTION.key):
+            if not co2_enabled:
+                entity_registry.async_remove(registry_entry.entity_id)
+            continue
+        if customer_key not in selected_keys:
+            entity_registry.async_remove(registry_entry.entity_id)
+            continue
+        if (
+            detailed_enabled
+            and _is_detailed_unique_id(registry_entry.unique_id)
+            and registry_entry.disabled_by == RegistryEntryDisabler.INTEGRATION
+        ):
+            entity_registry.async_update_entity(registry_entry.entity_id, disabled_by=None)
 
     device_registry = dr.async_get(hass)
     for device_entry in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
@@ -369,15 +397,23 @@ async def _async_remove_stale_registry_entries(
 
 
 def _customer_key_from_unique_id(unique_id: str) -> str | None:
-    for description in (
-        *DEFAULT_SENSOR_DESCRIPTIONS,
-        *DETAIL_SENSOR_DESCRIPTIONS,
-        CO2_SENSOR_DESCRIPTION,
-    ):
-        suffix = f"_{description.key}"
+    for description_key in SENSOR_DESCRIPTION_KEYS:
+        suffix = f"_{description_key}"
         if unique_id.endswith(suffix):
             return unique_id[: -len(suffix)]
     return None
+
+
+def _is_description_unique_id(unique_id: str, description_key: str) -> bool:
+    return unique_id.endswith(f"_{description_key}")
+
+
+def _is_detailed_unique_id(unique_id: str) -> bool:
+    return any(_is_description_unique_id(unique_id, key) for key in DETAIL_SENSOR_KEYS)
+
+
+def _is_this_entry_domain_entity(registry_entry: RegistryEntry, entry_id: str) -> bool:
+    return registry_entry.platform == DOMAIN and registry_entry.config_entry_id == entry_id
 
 
 def _customer_key_from_device_identifiers(identifiers: Iterable[tuple[str, ...]]) -> str | None:
