@@ -69,6 +69,8 @@ Raw endpoint and wire artifacts are intentionally untracked. Do not publish raw 
 | Customer list | Apartment/officetel rows parsed into apartment name, dong, ho, contract method, customer number, house contract number, support flag |
 | Bill detail | Effective month, server bill month, usage period, current/previous meter readings, usage comparisons, neighbor comparison fields from `/ui/my/charge/MYM053D50.xml`, amount due, charge breakdown, ordered monthly history |
 
+The official `/ui/my/charge/MYM053D50.xml` neighbor chart maps `DO_KWH` to the customer's monthly usage, `DO_APT_HOUS_USKI_AVG` to the same-building household average, and `DO_APT_TOT_USKI_AVG` to the whole-apartment average. All three values are kWh.
+
 No raw response body, request body, header set, cookie value, HAR, trace, or screenshot is committed.
 
 ## Runtime Limitations
