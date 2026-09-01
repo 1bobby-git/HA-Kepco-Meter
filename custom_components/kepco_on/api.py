@@ -41,6 +41,7 @@ ONLINE_HOST = "online.kepco.co.kr"
 ORIGIN = "https://online.kepco.co.kr/"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 TRANSIENT_STATUSES = frozenset({500, 502, 503})
+MAX_RETRY_AFTER_SECONDS = 30.0
 ALLOWED_PATHS = frozenset(
     {
         ENDPOINT_LOGIN_INDI,
@@ -97,14 +98,15 @@ def _parse_retry_after(value: str | None, clock: ClockCallback) -> float:
         return 0.0
     stripped = value.strip()
     if stripped.isdigit():
-        return float(int(stripped))
+        return min(float(int(stripped)), MAX_RETRY_AFTER_SECONDS)
     try:
         parsed = parsedate_to_datetime(stripped)
     except TypeError, ValueError:
         return 0.0
     if parsed.tzinfo is None or parsed.utcoffset() is None:
         parsed = parsed.replace(tzinfo=UTC)
-    return max(0.0, (parsed.astimezone(UTC) - clock().astimezone(UTC)).total_seconds())
+    seconds = max(0.0, (parsed.astimezone(UTC) - clock().astimezone(UTC)).total_seconds())
+    return min(seconds, MAX_RETRY_AFTER_SECONDS)
 
 
 async def _default_sleep(seconds: float) -> None:
@@ -309,4 +311,4 @@ class KepcoOnClient:
         return parsed
 
 
-__all__ = ["KepcoOnClient", "KepcoOnTransport"]
+__all__ = ["MAX_RETRY_AFTER_SECONDS", "KepcoOnClient", "KepcoOnTransport"]

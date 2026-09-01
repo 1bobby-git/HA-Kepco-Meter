@@ -995,13 +995,23 @@ async def test_reconfigure_loaded_entry_uses_live_customers_and_persists_selecte
 
 
 @pytest.mark.asyncio
-async def test_reconfigure_live_refresh_error_allows_retry_with_safe_form_error() -> None:
+@pytest.mark.parametrize(
+    ("raised", "error"),
+    [
+        (KepcoOnConnectionError(PASSWORD_SECRET), "cannot_connect"),
+        (KepcoOnProtocolError(PASSWORD_SECRET), "protocol_changed"),
+    ],
+)
+async def test_reconfigure_live_refresh_error_allows_retry_with_safe_form_error(
+    raised: Exception,
+    error: str,
+) -> None:
     from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
 
     entry = make_entry()
     live_client = FakeClient(cast("Any", object()))
     refreshed = (customer("key-1"), customer("key-2", apartment="별빛아파트"))
-    FakeClient.customer_results = [KepcoOnConnectionError(PASSWORD_SECRET), refreshed]
+    FakeClient.customer_results = [raised, refreshed]
     entry.state = ConfigEntryState.LOADED
     entry.runtime_data = type("Runtime", (), {"client": live_client, "session": FakeSession()})()
     flow = KepcoOnConfigFlow()
@@ -1016,11 +1026,34 @@ async def test_reconfigure_live_refresh_error_allows_retry_with_safe_form_error(
     result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-2"]})
 
     assert failed["type"] == "form"
-    assert failed["errors"] == {"base": "cannot_connect"}
+    assert failed["errors"] == {"base": error}
     assert PASSWORD_SECRET not in repr(failed)
     assert retried["type"] == "form"
     assert result["type"] == "abort"
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_live_refresh_unexpected_error_propagates() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    live_client = FakeClient(cast("Any", object()))
+    FakeClient.customer_results = [RuntimeError(PASSWORD_SECRET)]
+    entry.state = ConfigEntryState.LOADED
+    entry.runtime_data = type("Runtime", (), {"client": live_client, "session": FakeSession()})()
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.handler = DOMAIN
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    with pytest.raises(RuntimeError) as raised:
+        await flow.async_step_reconfigure()
+
+    assert str(raised.value) == PASSWORD_SECRET
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-1"]
 
 
 @pytest.mark.asyncio

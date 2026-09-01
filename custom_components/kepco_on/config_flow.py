@@ -393,6 +393,12 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         entry = self._get_reconfigure_entry()
         customers, refresh_error = await self._async_reconfigure_customers(entry)
         if customers is None:
+            if refresh_error is not None:
+                return self.async_show_form(
+                    step_id="reconfigure",
+                    data_schema=_customer_schema(()),
+                    errors={"base": refresh_error},
+                )
             return self.async_abort(reason="no_customers")
         current = [str(value) for value in entry.data.get(CONF_SELECTED_CUSTOMERS, [])]
         if user_input is None:
@@ -441,10 +447,17 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 live_customers: tuple[KepcoCustomer, ...] = tuple(
                     await client.async_get_customers()
                 )
-            except Exception as err:
-                return stored_customers(entry.data), _map_error(err)
+            except (
+                KepcoOnAuthError,
+                KepcoOnConnectionError,
+                KepcoOnNoCustomersError,
+                KepcoOnProtocolError,
+                KepcoOnRateLimitError,
+                KepcoOnUnsupportedAccount,
+            ) as err:
+                return None, _map_error(err)
             if not live_customers:
-                return stored_customers(entry.data), "no_customers"
+                return None, "no_customers"
             self._reconfigure_customers = live_customers
             return live_customers, None
 

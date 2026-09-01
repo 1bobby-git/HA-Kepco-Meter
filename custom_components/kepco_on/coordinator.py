@@ -87,7 +87,7 @@ class KepcoOnDataUpdateCoordinator(DataUpdateCoordinator[KepcoCoordinatorData]):
                 protocol_error_seen = True
                 async_create_issue(self.hass, self.entry, "bill_schema_changed")
                 errors[customer.stable_key] = _safe_customer_error(err)
-            except Exception as err:
+            except KepcoOnError as err:
                 errors[customer.stable_key] = _safe_customer_error(err)
 
         if not bills:

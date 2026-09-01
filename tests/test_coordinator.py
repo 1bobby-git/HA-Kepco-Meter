@@ -759,11 +759,13 @@ async def test_unload_unloads_platforms_and_closes_session() -> None:
     entry = make_entry(save_password=True)
     FakeAuth.login_results = [account_session()]
     assert await async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+    session = entry.runtime_data.session
 
     assert await async_unload_entry(cast("Any", hass), cast("Any", entry)) is True
 
     assert hass.config_entries.unloaded == [(entry, PLATFORMS)]
-    assert entry.runtime_data.session.closed is True
+    assert session.closed is True
+    assert entry.runtime_data is None
 
 
 @pytest.mark.asyncio
@@ -775,9 +777,11 @@ async def test_unload_keeps_session_open_when_platform_unload_fails() -> None:
     entry = make_entry(save_password=True)
     FakeAuth.login_results = [account_session()]
     assert await async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+    runtime_data = entry.runtime_data
 
     assert await async_unload_entry(cast("Any", hass), cast("Any", entry)) is False
 
+    assert entry.runtime_data is runtime_data
     assert entry.runtime_data.session.closed is False
 
 
@@ -996,7 +1000,7 @@ async def test_coordinator_all_customers_failed_raises_update_failed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_coordinator_records_unknown_error_for_unexpected_customer_exception() -> None:
+async def test_coordinator_propagates_unexpected_customer_exception() -> None:
     from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
 
     client = FakeClient(cast("Any", object()))
@@ -1009,11 +1013,10 @@ async def test_coordinator_records_unknown_error_for_unexpected_customer_excepti
         customers,
     )
 
-    data = await coordinator._async_update_data()
+    with pytest.raises(RuntimeError) as raised:
+        await coordinator._async_update_data()
 
-    assert data.bills_by_customer_key == {"key-1": bill("202608", 111)}
-    assert data.errors_by_customer_key == {"key-2": "unknown_error"}
-    assert TOKEN_SECRET not in repr(data)
+    assert str(raised.value) == f"boom {TOKEN_SECRET}"
 
 
 @pytest.mark.asyncio
@@ -1041,7 +1044,7 @@ async def test_coordinator_records_no_customer_and_api_errors_by_safe_category()
 
 
 @pytest.mark.asyncio
-async def test_coordinator_all_unexpected_customer_errors_raise_update_failed() -> None:
+async def test_coordinator_all_unexpected_customer_errors_propagate() -> None:
     from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
 
     client = FakeClient(cast("Any", object()))
@@ -1053,10 +1056,10 @@ async def test_coordinator_all_unexpected_customer_errors_raise_update_failed() 
         (customer("key-1"),),
     )
 
-    with pytest.raises(UpdateFailed) as raised:
+    with pytest.raises(RuntimeError) as raised:
         await coordinator._async_update_data()
 
-    assert TOKEN_SECRET not in str(raised.value)
+    assert str(raised.value) == f"boom {TOKEN_SECRET}"
 
 
 @pytest.mark.asyncio

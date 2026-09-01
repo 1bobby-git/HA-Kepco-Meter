@@ -46,7 +46,7 @@ def _utc_now() -> datetime:
 def _require_str(payload: JsonObject, field: str) -> str:
     value = payload.get(field)
     if not isinstance(value, str) or not value:
-        raise KepcoOnAuthError(f"KEPCO ON authentication response is missing {field}")
+        raise KepcoOnProtocolError(f"KEPCO ON authentication response is missing {field}")
     return value
 
 
@@ -113,8 +113,11 @@ class KepcoOnAuth:
             )
         except KepcoOnSessionExpired:
             return False
-        if payload.get("result") is not True:
+        result = payload.get("result")
+        if result is False:
             return False
+        if result is not True:
+            raise KepcoOnProtocolError("KEPCO ON validation response result is invalid")
         updated = self._session_from_validation(payload, session)
         await self._save_current_session(updated)
         return True
@@ -210,7 +213,7 @@ class KepcoOnAuth:
             raise KepcoOnAuthError("KEPCO ON authentication failed")
         session = KepcoAccountSession(
             refresh_token=_require_str(payload, "refreshToken"),
-            token=self._optional_str(payload, "token"),
+            token=_require_str(payload, "token"),
             user_id=_require_str(payload, "userId"),
             member_name=_require_str(payload, "mbrsNm"),
             user_mng_seqno=self._optional_str(payload, "userMngSeqno"),
@@ -234,7 +237,7 @@ class KepcoOnAuth:
     ) -> KepcoAccountSession:
         return KepcoAccountSession(
             refresh_token=_require_str(payload, "refreshToken"),
-            token=self._optional_str(payload, "token"),
+            token=_require_str(payload, "token"),
             user_id=_require_str(payload, "userId"),
             member_name=_require_str(payload, "mbrsNm"),
             user_mng_seqno=self._optional_str(payload, "userMngSeqno") or previous.user_mng_seqno,
@@ -257,7 +260,7 @@ class KepcoOnAuth:
         if value is None:
             return None
         if not isinstance(value, str):
-            raise KepcoOnAuthError(f"KEPCO ON authentication response field {field} is invalid")
+            raise KepcoOnProtocolError(f"KEPCO ON authentication response field {field} is invalid")
         return value or None
 
 

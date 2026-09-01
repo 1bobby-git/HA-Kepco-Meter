@@ -153,17 +153,52 @@ async def test_login_posts_exact_body_headers_and_saves_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_result_no_and_missing_tokens_raise_safe_auth_error() -> None:
-    for payload in (
-        {"result": "NO", "errorCode": "BAD", "errorMessage": PASSWORD_SECRET},
-        {"result": "YES", "refreshToken": REFRESH_SECRET, "userId": "user"},
-    ):
-        server = ResponsesMockServer()
-        server.add(HOST, "/cyb/me/login/indi/api", "post", response=json_response(payload))
-        async with auth_context(server, MemorySessionStore()) as auth:
-            with pytest.raises(KepcoOnAuthError) as raised:
-                await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
-            assert_no_secret(str(raised.value))
+async def test_login_result_no_raises_safe_auth_error() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/cyb/me/login/indi/api",
+        "post",
+        response=json_response(
+            {"result": "NO", "errorCode": "BAD", "errorMessage": PASSWORD_SECRET}
+        ),
+    )
+    async with auth_context(server, MemorySessionStore()) as auth:
+        with pytest.raises(KepcoOnAuthError) as raised:
+            await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+        assert_no_secret(str(raised.value))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"result": "YES", "token": "TOKEN_SECRET_CANARY", "userId": "user", "mbrsNm": "member"},
+        {"result": "YES", "refreshToken": REFRESH_SECRET, "userId": "user", "mbrsNm": "member"},
+        {
+            "result": "YES",
+            "token": "TOKEN_SECRET_CANARY",
+            "refreshToken": REFRESH_SECRET,
+            "mbrsNm": "member",
+        },
+        {
+            "result": "YES",
+            "token": "TOKEN_SECRET_CANARY",
+            "refreshToken": REFRESH_SECRET,
+            "userId": "user",
+        },
+        {"result": "MFA_REQUIRED", "challenge": "sms"},
+    ],
+)
+async def test_login_unknown_or_missing_token_schema_raises_protocol_error(
+    payload: Mapping[str, object],
+) -> None:
+    server = ResponsesMockServer()
+    server.add(HOST, "/cyb/me/login/indi/api", "post", response=json_response(payload))
+    async with auth_context(server, MemorySessionStore()) as auth:
+        with pytest.raises(KepcoOnProtocolError) as raised:
+            await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+        assert_no_secret(str(raised.value))
 
 
 @pytest.mark.asyncio
@@ -233,6 +268,42 @@ async def test_validate_session_expired_response_returns_false_without_saving() 
         await auth.async_restore_session()
 
         assert await auth.async_validate_session() is False
+
+    assert store.saved == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"result": True, "refreshToken": "REFRESH_ROTATED", "userId": "user", "mbrsNm": "member"},
+        {"result": True, "token": "TOKEN_ROTATED", "userId": "user", "mbrsNm": "member"},
+        {
+            "result": True,
+            "token": "TOKEN_ROTATED",
+            "refreshToken": "REFRESH_ROTATED",
+            "mbrsNm": "member",
+        },
+        {
+            "result": True,
+            "token": "TOKEN_ROTATED",
+            "refreshToken": "REFRESH_ROTATED",
+            "userId": "user",
+        },
+        {"result": "MFA_REQUIRED", "challenge": "sms"},
+    ],
+)
+async def test_validate_unknown_or_missing_token_schema_raises_protocol_error(
+    payload: Mapping[str, object],
+) -> None:
+    server = ResponsesMockServer()
+    server.add(HOST, "/sessionCheck", "post", response=json_response(payload))
+    store = MemorySessionStore(make_session())
+    async with auth_context(server, store) as auth:
+        await auth.async_restore_session()
+        with pytest.raises(KepcoOnProtocolError) as raised:
+            await auth.async_validate_session()
+        assert_no_secret(str(raised.value))
 
     assert store.saved == []
 
@@ -567,7 +638,7 @@ async def test_login_rejects_non_string_optional_payload_field() -> None:
         ),
     )
     async with auth_context(server, MemorySessionStore()) as auth:
-        with pytest.raises(KepcoOnAuthError) as raised:
+        with pytest.raises(KepcoOnProtocolError) as raised:
             await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
 
     assert "token" in str(raised.value)

@@ -220,6 +220,18 @@ def test_parse_customers_rejects_missing_or_unsupported_customer_fields(
         parse_customers(payload, "ACCOUNT_HASH")
 
 
+def test_parse_customers_rejects_generic_only_customer_aliases() -> None:
+    payload = load_fixture("customer_list_single.json")
+    row = as_object_dict(cast(list[object], payload["dlt_appendList"])[0])
+    row.pop("APT_NAME")
+    row.pop("APT_DONGNO")
+    row.pop("APT_HONO")
+    row.update({"APT_NM": "TEST_APT_ALIAS", "DONG_NO": "1001", "HO_NO": "0101"})
+
+    with pytest.raises(KepcoOnProtocolError):
+        parse_customers(payload, "ACCOUNT_HASH")
+
+
 def test_parse_customer_repr_does_not_expose_raw_identifiers() -> None:
     customer = parse_customers(load_fixture("customer_list_single.json"), "ACCOUNT_HASH")[0]
 
@@ -313,7 +325,10 @@ def test_parse_requested_bill_uses_requested_month_over_response_month() -> None
 
 def test_parse_bill_status_success_accepts_hxi001() -> None:
     bill = parse_bill(
-        {"rsMsg": {"statusCode": "S"}, "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        {
+            "rsMsg": {"statusCode": "S"},
+            "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        },
         None,
     )
 
@@ -325,12 +340,14 @@ def test_parse_bill_status_success_accepts_hxi001() -> None:
     [
         {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
         {"status": "S", "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
-        {"rsMsg": {"statusCode": "F"}, "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        {
+            "rsMsg": {"statusCode": "F"},
+            "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        },
         {
             "status": "S",
             "rsMsg": {"statusCode": "F"},
-            "DO_ERR_CODE": "HXI001",
-            "DO_BILL_YM": "202608",
+            "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
         },
     ],
 )
@@ -346,24 +363,24 @@ def test_parse_bill_requires_object_dma_result() -> None:
 
 def test_parse_bill_requires_effective_month_from_request_or_response() -> None:
     with pytest.raises(KepcoOnProtocolError):
-        parse_bill({"rsMsg": {"statusCode": "S"}}, None)
+        parse_bill({"rsMsg": {"statusCode": "S"}, "dma_result": {}}, None)
 
 
 def test_parse_bill_history_must_be_sorted_unique_and_valid() -> None:
     base = load_fixture("bill_latest.json")
 
     duplicate = dict(base)
-    duplicate["history"] = [{"BILL_YM": "202607"}, {"BILL_YM": "202607"}]
+    duplicate["dlt_chrtList"] = [{"DO_CHRT_REQ_YM": "202607"}, {"DO_CHRT_REQ_YM": "202607"}]
     with pytest.raises(KepcoOnProtocolError):
         parse_bill(duplicate, None)
 
     unsorted = dict(base)
-    unsorted["history"] = [{"BILL_YM": "202608"}, {"BILL_YM": "202607"}]
+    unsorted["dlt_chrtList"] = [{"DO_CHRT_REQ_YM": "202608"}, {"DO_CHRT_REQ_YM": "202607"}]
     with pytest.raises(KepcoOnProtocolError):
         parse_bill(unsorted, None)
 
     invalid = dict(base)
-    invalid["history"] = [{"BILL_YM": "20260230"}]
+    invalid["dlt_chrtList"] = [{"DO_CHRT_REQ_YM": "20260230"}]
     with pytest.raises(KepcoOnProtocolError):
         parse_bill(invalid, None)
 
@@ -374,15 +391,14 @@ def test_parse_bill_history_must_be_sorted_unique_and_valid() -> None:
         "not-list",
         ["not-object"],
         [{}],
-        [{"BILL_YM": "202608"}, {"BILL_YM": "202607"}],
+        [{"DO_CHRT_REQ_YM": "202608"}, {"DO_CHRT_REQ_YM": "202607"}],
     ],
 )
 def test_parse_bill_rejects_malformed_history_shapes(history: object) -> None:
     payload = {
         "rsMsg": {"statusCode": "S"},
-        "DO_ERR_CODE": "HXI001",
-        "DO_BILL_YM": "202608",
-        "history": history,
+        "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        "dlt_chrtList": history,
     }
 
     with pytest.raises(KepcoOnProtocolError):
@@ -401,9 +417,8 @@ def test_parse_bill_rejects_large_response_history_month_contradiction() -> None
 def test_parse_bill_rejects_history_range_that_misses_effective_month() -> None:
     payload: dict[str, object] = {
         "rsMsg": {"statusCode": "S"},
-        "DO_ERR_CODE": "HXI001",
-        "DO_BILL_YM": "202608",
-        "history": [{"BILL_YM": "202607"}],
+        "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        "dlt_chrtList": [{"DO_CHRT_REQ_YM": "202607"}],
     }
 
     with pytest.raises(KepcoOnProtocolError):
@@ -413,9 +428,8 @@ def test_parse_bill_rejects_history_range_that_misses_effective_month() -> None:
 def test_parse_bill_accepts_december_history_with_next_january_response_month() -> None:
     payload: dict[str, object] = {
         "rsMsg": {"statusCode": "S"},
-        "DO_ERR_CODE": "HXI001",
-        "DO_BILL_YM": "202701",
-        "history": [{"BILL_YM": "202612"}],
+        "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202701"},
+        "dlt_chrtList": [{"DO_CHRT_REQ_YM": "202612"}],
     }
 
     bill = parse_bill(
@@ -427,29 +441,38 @@ def test_parse_bill_accepts_december_history_with_next_january_response_month() 
     assert bill.response_bill_month == "202701"
 
 
-def test_parse_bill_uses_fallback_mapping_when_dma_result_omits_values() -> None:
-    bill = parse_bill(
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"rsMsg": {"statusCode": "S"}, "DO_BILL_YM": "202608"},
+        {"rsMsg": {"statusCode": "S"}, "dma_result": {}, "BILL_YM": "202608"},
         {
             "rsMsg": {"statusCode": "S"},
-            "dma_result": {},
-            "BILL_YM": "202608",
-            "USE_QTY": "111",
+            "dma_result": {"DO_BILL_YM": "202608"},
+            "history": [{"BILL_YM": "202608"}],
         },
-        None,
-    )
-
-    assert bill.bill_month == "202608"
-    assert bill.usage_kwh == 111
+        {
+            "rsMsg": {"statusCode": "S"},
+            "dma_result": {"DO_BILL_YM": "202608"},
+            "dlt_chrtList": [{"BILL_YM": "202608"}],
+        },
+    ],
+)
+def test_parse_bill_rejects_generic_only_payload_shapes(payload: dict[str, object]) -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_bill(payload, None)
 
 
 def test_parse_bill_empty_values_are_none_and_comma_numbers_work() -> None:
     bill = parse_bill(
         {
             "rsMsg": {"statusCode": "S"},
-            "DO_ERR_CODE": "HXI001",
-            "DO_BILL_YM": "202608",
-            "USE_QTY": "",
-            "BILL_AMT": "96,330",
+            "dma_result": {
+                "DO_ERR_CODE": "HXI001",
+                "DO_BILL_YM": "202608",
+                "DO_KWH": "",
+                "DO_PRE_REQ_BILL": "96,330",
+            },
         },
         None,
     )

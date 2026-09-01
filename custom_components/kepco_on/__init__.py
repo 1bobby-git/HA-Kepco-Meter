@@ -208,6 +208,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> 
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     if unload_ok:
         await _close_session(entry.runtime_data.session)
+        _clear_runtime_data(entry)
     return unload_ok
 
 

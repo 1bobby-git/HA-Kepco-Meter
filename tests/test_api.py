@@ -423,6 +423,19 @@ async def test_transport_honors_integer_retry_after_then_raises_rate_limit() -> 
 
 
 @pytest.mark.asyncio
+async def test_transport_caps_large_integer_retry_after_then_raises_rate_limit() -> None:
+    server = ResponsesMockServer()
+    response = json_response({"error": "rate"}, status=429)
+    response.headers["Retry-After"] = "999999"
+    server.add(HOST, "/sessionCheck", "post", response=response)
+
+    with pytest.raises(KepcoOnRateLimitError):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+    assert SLEEP_CALLS == [kepco_api.MAX_RETRY_AFTER_SECONDS]
+
+
+@pytest.mark.asyncio
 async def test_transport_honors_http_date_retry_after_then_raises_rate_limit() -> None:
     now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
     server = ResponsesMockServer()
@@ -442,7 +455,26 @@ async def test_transport_honors_http_date_retry_after_then_raises_rate_limit() -
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("retry_after", [None, "not-a-date"])
+async def test_transport_caps_far_future_http_date_retry_after_then_raises_rate_limit() -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    server = ResponsesMockServer()
+    response = json_response({"error": "rate"}, status=429)
+    response.headers["Retry-After"] = format_datetime(
+        datetime(2026, 9, 1, 2, 0, tzinfo=UTC), usegmt=True
+    )
+    server.add(HOST, "/sessionCheck", "post", response=response)
+
+    with pytest.raises(KepcoOnRateLimitError):
+        await with_transport(
+            lambda transport: transport.request_json("/sessionCheck", {}, clock=lambda: now),
+            server,
+        )
+
+    assert SLEEP_CALLS == [kepco_api.MAX_RETRY_AFTER_SECONDS]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_after", [None, "not-a-date", "-1"])
 async def test_transport_invalid_retry_after_sleeps_zero_then_raises_rate_limit(
     retry_after: str | None,
 ) -> None:
@@ -703,8 +735,7 @@ async def test_client_get_bill_uses_latest_and_historical_bodies() -> None:
         calls.append(payload)
         return {
             "rsMsg": {"statusCode": "S"},
-            "DO_ERR_CODE": "HXI001",
-            "DO_BILL_YM": "202608",
+            "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
         }
 
     class Auth:
@@ -815,7 +846,10 @@ async def test_client_accepts_current_home_assistant_local_month_at_utc_boundary
             del path, submission_id
             assert payload is not None
             requests.append(payload)
-            return {"rsMsg": {"statusCode": "S"}, "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202609"}
+            return {
+                "rsMsg": {"statusCode": "S"},
+                "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202609"},
+            }
 
         def account_uid_hash(self) -> str:
             return "ACCOUNT_HASH"
@@ -852,7 +886,10 @@ async def test_client_get_all_current_bills_runs_sequentially() -> None:
         max_in_flight = max(max_in_flight, in_flight)
         await asyncio.sleep(0)
         in_flight -= 1
-        return {"rsMsg": {"statusCode": "S"}, "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"}
+        return {
+            "rsMsg": {"statusCode": "S"},
+            "dma_result": {"DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202608"},
+        }
 
     class Auth:
         async_protected_request = staticmethod(protected_request)
