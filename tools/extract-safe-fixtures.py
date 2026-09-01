@@ -62,7 +62,7 @@ SENSITIVE_NAME_SUFFIXES = ("name", "nm")
 
 SYNTHETIC_CUSTOMERS = (
     {
-        "APT_NAME": "테스트아파트",
+        "APT_NAME": "TEST_APT_001",
         "APT_DONGNO": "1001",
         "APT_HONO": "0101",
         "CUST_NO": "TEST_CUST_001",
@@ -70,7 +70,7 @@ SYNTHETIC_CUSTOMERS = (
         "cntrMthdCd": "아파트(단일계약)",
     },
     {
-        "APT_NAME": "테스트아파트 2",
+        "APT_NAME": "TEST_APT_002",
         "APT_DONGNO": "1002",
         "APT_HONO": "0102",
         "CUST_NO": "TEST_CUST_002",

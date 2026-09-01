@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tomllib
 from pathlib import Path
 from typing import Any, cast
 
@@ -12,6 +13,81 @@ from packaging.requirements import Requirement
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
+ACTION_REFS = {
+    "actions/checkout": {
+        "ref": "3d3c42e5aac5ba805825da76410c181273ba90b1",
+        "comment": "source: actions/checkout@v7",
+    },
+    "actions/setup-python": {
+        "ref": "5fda3b95a4ea91299a34e894583c3862153e4b97",
+        "comment": "source: actions/setup-python@v7",
+    },
+    "actions/setup-node": {
+        "ref": "820762786026740c76f36085b0efc47a31fe5020",
+        "comment": "source: actions/setup-node@v7",
+    },
+    "hacs/action": {
+        "ref": "1ebf01c408f29afcb6406bd431bc98fd8cbb15aa",
+        "comment": "source: hacs/action@main",
+    },
+    "home-assistant/actions/hassfest": {
+        "ref": "a7c616ce81ccda50150bf1595786c71b1883fabb",
+        "comment": "source: home-assistant/actions/hassfest@master",
+    },
+}
+ALLOWED_FIXTURES = {
+    "bill_202607.json",
+    "bill_latest.json",
+    "customer_list_multiple.json",
+    "customer_list_single.json",
+    "session_check_success.json",
+    "sso_check_success.json",
+}
+SENSITIVE_FILE_SUFFIXES = (".har", ".jsonl", ".trace.zip")
+SENSITIVE_FILE_NAMES = {"secrets.yaml"}
+RAW_ARTIFACT_PREFIXES = ("session", "cookies", "login-schema")
+FORBIDDEN_KEYS = {
+    "access_token",
+    "address",
+    "api_body",
+    "authorization",
+    "body",
+    "cookie",
+    "cookies",
+    "email",
+    "headers",
+    "member_name",
+    "name",
+    "password",
+    "phone",
+    "pwdval",
+    "raw",
+    "refresh_token",
+    "token",
+}
+FORBIDDEN_KEY_PARTS = (
+    "address",
+    "authorization",
+    "cookie",
+    "email",
+    "header",
+    "name",
+    "nm",
+    "password",
+    "phone",
+    "pwd",
+    "raw",
+    "token",
+)
+FORBIDDEN_VALUE_PARTS = (
+    "bearer ",
+    "cookie:",
+    "eyj",
+    "password",
+    "secret_canary",
+    "set-cookie",
+)
+SAFE_SYNTHETIC_FIXTURE_KEYS = {"apt_name", "apt_nm", "cust_no", "si_cust_no"}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -42,6 +118,69 @@ def run_values(steps: list[dict[str, Any]]) -> list[str]:
     return [cast("str", step["run"]) for step in steps if "run" in step]
 
 
+def workflow_text(name: str) -> str:
+    return (WORKFLOWS / name).read_text(encoding="utf-8")
+
+
+def uses_for_action(steps: list[dict[str, Any]], action: str) -> str:
+    matches = [value for value in uses_values(steps) if value.startswith(f"{action}@")]
+    assert len(matches) == 1
+    return matches[0]
+
+
+def assert_pinned_action(workflow_source: str, steps: list[dict[str, Any]], action: str) -> None:
+    expected = ACTION_REFS[action]
+    uses = uses_for_action(steps, action)
+    assert uses == f"{action}@{expected['ref']}"
+    assert f"uses: {uses} # {expected['comment']}" in workflow_source
+    ref = uses.rsplit("@", 1)[1]
+    assert len(ref) == 40
+    assert all(character in "0123456789abcdef" for character in ref)
+    assert not ref.startswith("v")
+    assert ref not in {"main", "master"}
+
+
+def tracked_files() -> list[str]:
+    return subprocess.run(
+        ["git", "ls-files"],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+
+
+def assert_fixture_value_is_safe(key: str, value: object) -> None:
+    normalized_key = key.lower()
+    if normalized_key in SAFE_SYNTHETIC_FIXTURE_KEYS:
+        assert isinstance(value, str)
+        assert value.startswith("TEST_")
+        return
+    if not isinstance(value, str):
+        return
+    lowered = value.lower()
+    assert "@" not in value
+    assert not any(part in lowered for part in FORBIDDEN_VALUE_PARTS)
+    assert not any(character.isdigit() for character in value if "phone" in normalized_key)
+
+
+def scan_fixture(value: object, path: tuple[str, ...] = ()) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            normalized_key = str(key).replace("-", "_").lower()
+            if normalized_key not in SAFE_SYNTHETIC_FIXTURE_KEYS:
+                assert normalized_key not in FORBIDDEN_KEYS
+                assert not any(part in normalized_key for part in FORBIDDEN_KEY_PARTS)
+            scan_fixture(item, (*path, str(key)))
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            scan_fixture(item, (*path, str(index)))
+        return
+    if path:
+        assert_fixture_value_is_safe(path[-1], value)
+
+
 def test_workflow_yaml_files_parse_with_github_on_key() -> None:
     workflows = {path.name: load_yaml(path) for path in WORKFLOWS.glob("*.yml")}
 
@@ -52,23 +191,22 @@ def test_workflow_yaml_files_parse_with_github_on_key() -> None:
 
 def test_tests_workflow_runs_required_ci_gates_without_continue_on_error() -> None:
     workflow = load_yaml(WORKFLOWS / "tests.yml")
+    source = workflow_text("tests.yml")
     triggers = workflow_on(workflow)
     steps = run_steps(workflow, "tests")
 
     assert set(triggers) == {"push", "pull_request", "workflow_dispatch"}
     assert workflow["permissions"] == {"contents": "read"}
-    assert workflow["jobs"]["tests"]["runs-on"] == "ubuntu-latest"
-    assert uses_values(steps) == [
-        "actions/checkout@v7",
-        "actions/setup-python@v7",
-        "actions/setup-node@v7",
-    ]
+    assert workflow["jobs"]["tests"]["runs-on"] == "ubuntu-24.04"
+    assert_pinned_action(source, steps, "actions/checkout")
+    assert_pinned_action(source, steps, "actions/setup-python")
+    assert_pinned_action(source, steps, "actions/setup-node")
     assert cast("dict[str, Any]", steps[1]["with"]) == {
-        "python-version": "3.14",
+        "python-version": "3.14.4",
         "cache": "pip",
         "cache-dependency-path": "requirements_test.txt",
     }
-    assert cast("dict[str, Any]", steps[3]["with"]) == {"node-version": "24", "cache": "npm"}
+    assert cast("dict[str, Any]", steps[3]["with"]) == {"node-version": "24.20.0", "cache": "npm"}
     assert run_values(steps) == [
         "python -m pip install -r requirements_test.txt",
         "npm ci",
@@ -88,6 +226,7 @@ def test_tests_workflow_runs_required_ci_gates_without_continue_on_error() -> No
 
 def test_validate_workflow_runs_hacs_and_hassfest_required_checks() -> None:
     workflow = load_yaml(WORKFLOWS / "validate.yml")
+    source = workflow_text("validate.yml")
     triggers = workflow_on(workflow)
     jobs = cast("dict[str, Any]", workflow["jobs"])
 
@@ -95,14 +234,14 @@ def test_validate_workflow_runs_hacs_and_hassfest_required_checks() -> None:
     assert triggers["schedule"] == [{"cron": "17 3 * * 0"}]
     assert workflow["permissions"] == {"contents": "read"}
     assert set(jobs) == {"hacs", "hassfest"}
-    assert uses_values(run_steps(workflow, "hacs")) == ["actions/checkout@v7", "hacs/action@main"]
-    assert cast("dict[str, Any]", run_steps(workflow, "hacs")[1]["with"]) == {
-        "category": "integration"
-    }
-    assert uses_values(run_steps(workflow, "hassfest")) == [
-        "actions/checkout@v7",
-        "home-assistant/actions/hassfest@master",
-    ]
+    for job_name in ("hacs", "hassfest"):
+        assert jobs[job_name]["runs-on"] == "ubuntu-24.04"
+        assert_pinned_action(source, run_steps(workflow, job_name), "actions/checkout")
+    hacs_steps = run_steps(workflow, "hacs")
+    hassfest_steps = run_steps(workflow, "hassfest")
+    assert_pinned_action(source, hacs_steps, "hacs/action")
+    assert cast("dict[str, Any]", hacs_steps[1]["with"]) == {"category": "integration"}
+    assert_pinned_action(source, hassfest_steps, "home-assistant/actions/hassfest")
     assert "continue-on-error" not in json.dumps(workflow)
 
 
@@ -130,32 +269,42 @@ def test_test_requirements_include_yaml_parser_for_local_workflow_validation() -
 
 
 def test_coverage_config_keeps_95_branch_gate_and_only_excludes_typing_surfaces() -> None:
-    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    coverage = pyproject["tool"]["coverage"]
+    report = coverage["report"]
 
-    assert "branch = true" in pyproject
-    assert "fail_under = 95" in pyproject
-    assert "class .*\\\\(Protocol\\\\):" in pyproject
-    assert "TYPE_CHECKING" in pyproject
-    assert "pragma: no cover" not in pyproject
+    assert coverage["run"] == {"branch": True, "source": ["custom_components/kepco_on"]}
+    assert report["fail_under"] == 95
+    assert report["show_missing"] is True
+    assert report["skip_covered"] is True
+    assert report["exclude_also"] == [
+        "^class .*\\(Protocol\\):$",
+        "^if TYPE_CHECKING:$",
+    ]
+    assert "omit" not in coverage["run"]
+    assert "exclude_lines" not in report
 
 
 def test_repository_tracks_no_raw_capture_or_secret_artifacts() -> None:
-    forbidden_suffixes = (".har", ".jsonl", ".trace.zip")
-    forbidden_names = {"secrets.yaml"}
-    raw_session_prefixes = ("session", "cookies", "login-schema")
-    tracked = subprocess.run(
-        ["git", "ls-files"],
-        cwd=ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.splitlines()
-
-    for relative in tracked:
+    for relative in tracked_files():
+        normalized = relative.lower()
         path = Path(relative)
-        assert path.name not in forbidden_names
-        assert not relative.endswith(forbidden_suffixes)
+        assert path.name.lower() not in SENSITIVE_FILE_NAMES
+        assert not normalized.endswith(SENSITIVE_FILE_SUFFIXES)
         if path.parts[:2] == ("tests", "fixtures"):
+            assert path.name in ALLOWED_FIXTURES
             continue
         if path.suffix in {".json", ".zip"}:
-            assert not any(path.name.lower().startswith(prefix) for prefix in raw_session_prefixes)
+            assert not any(path.name.lower().startswith(prefix) for prefix in RAW_ARTIFACT_PREFIXES)
+
+
+def test_committed_json_fixtures_are_sanitized_and_allowlisted() -> None:
+    fixture_paths = [
+        ROOT / relative
+        for relative in tracked_files()
+        if relative.lower().startswith("tests/fixtures/") and relative.lower().endswith(".json")
+    ]
+
+    assert {path.name for path in fixture_paths} == ALLOWED_FIXTURES
+    for path in fixture_paths:
+        scan_fixture(load_json(path))

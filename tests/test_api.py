@@ -670,7 +670,7 @@ async def test_client_get_customers_uses_mypage_endpoint_body_and_parser() -> No
                 {
                     "APT_DONGNO": "1001",
                     "APT_HONO": "0101",
-                    "APT_NAME": "테스트아파트",
+                    "APT_NAME": "TEST_APT_001",
                     "CUST_NO": "TEST_CUST_001",
                     "SI_CUST_NO": "TEST_HOUSE_001",
                     "cntrMthdCd": "아파트(단일계약)",

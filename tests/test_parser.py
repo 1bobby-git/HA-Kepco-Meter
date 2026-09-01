@@ -159,7 +159,7 @@ def test_parse_customers_accepts_single_customer_append_list() -> None:
     customer = customers[0]
     assert customer.customer_number == "TEST_CUST_001"
     assert customer.house_contract_number == "TEST_HOUSE_001"
-    assert customer.apartment_name == "테스트아파트"
+    assert customer.apartment_name == "TEST_APT_001"
     assert customer.dong == "1001"
     assert customer.ho == "0101"
     assert customer.contract_method == "아파트(단일계약)"

@@ -5,7 +5,7 @@
     {
       "APT_DONGNO": "1001",
       "APT_HONO": "0101",
-      "APT_NAME": "테스트아파트",
+      "APT_NAME": "TEST_APT_001",
       "CUST_NO": "TEST_CUST_001",
       "SI_CUST_NO": "TEST_HOUSE_001",
       "cntrMthdCd": "아파트(단일계약)"
@@ -13,7 +13,7 @@
     {
       "APT_DONGNO": "1002",
       "APT_HONO": "0102",
-      "APT_NAME": "테스트아파트 2",
+      "APT_NAME": "TEST_APT_002",
       "CUST_NO": "TEST_CUST_002",
       "SI_CUST_NO": "TEST_HOUSE_002",
       "cntrMthdCd": "아파트(단일계약)"
