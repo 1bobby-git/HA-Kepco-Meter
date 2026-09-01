@@ -24,6 +24,8 @@ from .session_store import export_cookies, restore_cookies
 
 JsonObject = dict[str, object]
 ClockCallback = Callable[[], datetime]
+LOGIN_REQUEST_FIELD = "dma_loginData"
+LOGIN_RESPONSE_FIELD = "dma_loginData2"
 LOGIN_RESPONSE_FIELDS = (
     "result",
     "errorCode",
@@ -86,6 +88,23 @@ def _safe_login_response_shape(payload: JsonObject) -> str:
         f"{field}={_safe_value_shape(payload[field]) if field in payload else 'missing'}"
         for field in LOGIN_RESPONSE_FIELDS
     )
+
+
+def _login_request_payload(username: str, password: str) -> JsonObject:
+    return {
+        LOGIN_REQUEST_FIELD: {
+            "userId": username,
+            "pwdVal": password,
+            "autoFlag": "N",
+        }
+    }
+
+
+def _login_response_payload(payload: JsonObject) -> JsonObject:
+    wrapped = payload.get(LOGIN_RESPONSE_FIELD)
+    if isinstance(wrapped, dict):
+        return wrapped
+    return payload
 
 
 class KepcoOnAuth:
@@ -243,11 +262,7 @@ class KepcoOnAuth:
         if not password.strip():
             raise KepcoOnAuthError("KEPCO ON password is required to authenticate")
         await self._transport.async_prepare_login_session()
-        login_payload: JsonObject = {
-            "userId": trimmed_username,
-            "pwdVal": password,
-            "autoFlag": "N",
-        }
+        login_payload = _login_request_payload(trimmed_username, password)
         payload = await self._transport.request_json(
             ENDPOINT_LOGIN_INDI,
             login_payload,
@@ -259,6 +274,7 @@ class KepcoOnAuth:
                 login_payload,
                 submission_id="mf_login_popup_wframe_sbm_submission4",
             )
+        payload = _login_response_payload(payload)
         if payload.get("result") == "NO":
             raise KepcoOnAuthError("KEPCO ON authentication failed")
         try:

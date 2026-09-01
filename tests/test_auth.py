@@ -153,11 +153,13 @@ async def test_login_posts_exact_body_headers_and_saves_session() -> None:
         captured["headers"] = dict(request.headers)
         return json_response(
             {
-                "result": "YES",
-                "token": "TOKEN_SECRET_CANARY",
-                "refreshToken": REFRESH_SECRET,
-                "userId": "USER_ID_SECRET_CANARY",
-                "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+                "dma_loginData2": {
+                    "result": "YES",
+                    "token": "TOKEN_SECRET_CANARY",
+                    "refreshToken": REFRESH_SECRET,
+                    "userId": "USER_ID_SECRET_CANARY",
+                    "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+                }
             }
         )
 
@@ -170,9 +172,11 @@ async def test_login_posts_exact_body_headers_and_saves_session() -> None:
     headers = cast("dict[str, str]", captured["headers"])
     assert captured["path"] == "/cyb/me/login/indi/api"
     assert captured["body"] == {
-        "userId": USERNAME_SECRET.strip(),
-        "pwdVal": PASSWORD_SECRET,
-        "autoFlag": "N",
+        "dma_loginData": {
+            "userId": USERNAME_SECRET.strip(),
+            "pwdVal": PASSWORD_SECRET,
+            "autoFlag": "N",
+        }
     }
     assert headers["Accept"] == "application/json"
     assert headers["Content-Type"] == "application/json; charset=UTF-8"
@@ -235,19 +239,23 @@ async def test_login_retries_one_empty_cold_session_response() -> None:
         nonlocal attempts
         attempts += 1
         assert await request_json(request) == {
-            "userId": USERNAME_SECRET.strip(),
-            "pwdVal": PASSWORD_SECRET,
-            "autoFlag": "N",
+            "dma_loginData": {
+                "userId": USERNAME_SECRET.strip(),
+                "pwdVal": PASSWORD_SECRET,
+                "autoFlag": "N",
+            }
         }
         if attempts == 1:
             return json_response({})
         return json_response(
             {
-                "result": "YES",
-                "token": "TOKEN_SECRET_CANARY",
-                "refreshToken": REFRESH_SECRET,
-                "userId": "USER_ID_SECRET_CANARY",
-                "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+                "dma_loginData2": {
+                    "result": "YES",
+                    "token": "TOKEN_SECRET_CANARY",
+                    "refreshToken": REFRESH_SECRET,
+                    "userId": "USER_ID_SECRET_CANARY",
+                    "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+                }
             }
         )
 
@@ -270,7 +278,13 @@ async def test_login_result_no_raises_safe_auth_error() -> None:
         "/cyb/me/login/indi/api",
         "post",
         response=json_response(
-            {"result": "NO", "errorCode": "BAD", "errorMessage": PASSWORD_SECRET}
+            {
+                "dma_loginData2": {
+                    "result": "NO",
+                    "errorCode": "BAD",
+                    "errorMessage": PASSWORD_SECRET,
+                }
+            }
         ),
     )
     async with auth_context(server, MemorySessionStore()) as auth:
@@ -528,9 +542,11 @@ async def test_reauthenticate_uses_configured_credentials_and_returns_none() -> 
         await auth.async_reauthenticate()
 
     assert captured["body"] == {
-        "userId": "SAVED_USER",
-        "pwdVal": "SAVED_PASSWORD",
-        "autoFlag": "N",
+        "dma_loginData": {
+            "userId": "SAVED_USER",
+            "pwdVal": "SAVED_PASSWORD",
+            "autoFlag": "N",
+        }
     }
     assert store.saved[-1].refresh_token == "REFRESH_ROTATED"
 
