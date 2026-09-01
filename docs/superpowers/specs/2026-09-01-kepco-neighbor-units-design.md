@@ -26,14 +26,14 @@ Create a default-enabled sensor description with key `neighbor_usage_comparison`
 - Native state: the selected household's current monthly usage from `KepcoBill.usage_kwh`
 - Native unit: `kWh`
 - Device class: `energy`
-- State class: none, because this is a monthly comparison value rather than a cumulative meter
+- State class: omitted (`None`), because this is a monthly comparison value rather than a cumulative meter
 - Extra attributes:
   - `same_building_average_kwh`: `KepcoBill.building_average_kwh`
   - `apartment_average_kwh`: `KepcoBill.apartment_average_kwh`
 
 The attributes contain parsed integers or `None`; they never contain raw customer numbers, contract numbers, names, addresses, tokens, cookies, or response bodies.
 
-The existing `monthly_usage`, `building_average_usage`, and `apartment_average_usage` sensors remain for backward compatibility. The new entity groups their meaning under the official KEPCO chart name without changing existing unique IDs.
+The existing `monthly_usage`, `building_average_usage`, and `apartment_average_usage` sensors remain for backward compatibility. The new entity intentionally repeats those three parsed values as one chart-oriented state/attribute view under the official KEPCO name. Translations must make the grouping clear; existing unique IDs and entity names are not renamed or removed.
 
 ## Unit policy
 
@@ -45,7 +45,7 @@ The existing `monthly_usage`, `building_average_usage`, and `apartment_average_u
 
 The coordinator continues to fetch and parse one bill per selected household. The new sensor reads only the existing typed `KepcoBill`; it does not add network calls, polling, storage, authentication state, or parser fallbacks.
 
-The sensor's native state and attributes update together whenever the coordinator refreshes. If a source field is missing, only the corresponding value is `None`; other comparison values remain available.
+The sensor's native state and attributes update together whenever the coordinator refreshes. If a source field is missing, only the corresponding value is `None`; other comparison values remain available. The existing strict integer parser remains authoritative: captured integer or comma-formatted integer strings are accepted, empty values become `None`, and decimal strings remain protocol errors. The comparison sensor performs no extra rounding or coercion.
 
 ## Options and migration
 
