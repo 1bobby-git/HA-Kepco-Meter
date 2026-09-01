@@ -704,9 +704,10 @@ async def test_transport_does_not_unbounded_read_oversized_5xx_response() -> Non
     fake_session = FakeSession()
     transport = KepcoOnTransport(cast("ClientSession", fake_session), sleep=sleep_recorder)
 
-    with pytest.raises(KepcoOnConnectionError):
+    with pytest.raises(KepcoOnConnectionError) as raised:
         await transport.request_json("/sessionCheck", {})
 
+    assert "HTTP 500" in str(raised.value)
     assert fake_session.attempts == 3
     assert [response.content.reads for response in fake_session.responses] == [1, 1, 1]
     assert [response.released for response in fake_session.responses] == [True, True, True]

@@ -80,6 +80,10 @@ def _utc_now() -> datetime:
 class _TemporaryHttpError(Exception):
     """Internal retry signal for transient KEPCO HTTP failures."""
 
+    def __init__(self, status: int) -> None:
+        self.status = status
+        super().__init__(f"HTTP {status}")
+
 
 def _safe_protocol_error(reason: str) -> KepcoOnProtocolError:
     return KepcoOnProtocolError(f"Unexpected KEPCO ON response: {reason}")
@@ -190,7 +194,7 @@ class KepcoOnTransport:
             except _TemporaryHttpError as err:
                 if attempt == 2:
                     raise KepcoOnConnectionError(
-                        "KEPCO ON returned a temporary HTTP error"
+                        f"KEPCO ON returned temporary HTTP {err.status}"
                     ) from err
                 await self._sleep(float(2**attempt))
             except KepcoOnConnectionError:
@@ -216,7 +220,7 @@ class KepcoOnTransport:
         if response.status in TRANSIENT_STATUSES:
             await response.content.read(MAX_RESPONSE_BYTES + 1)
             response.release()
-            raise _TemporaryHttpError
+            raise _TemporaryHttpError(response.status)
         if response.status == 429:
             await self._sleep(_parse_retry_after(response.headers.get("Retry-After"), clock))
             raise KepcoOnRateLimitError("KEPCO ON rate limit was reached")
@@ -225,7 +229,7 @@ class KepcoOnTransport:
         if response.status == 204:
             return {}
         if response.status >= 400:
-            raise KepcoOnConnectionError("KEPCO ON returned an HTTP error")
+            raise KepcoOnConnectionError(f"KEPCO ON returned HTTP {response.status}")
 
         body = await response.content.read(MAX_RESPONSE_BYTES + 1)
         if len(body) > MAX_RESPONSE_BYTES:

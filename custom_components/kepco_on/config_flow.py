@@ -257,7 +257,9 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             abort_reason = err.reason
         except EXPECTED_CONFIG_FLOW_ERRORS as err:
             _LOGGER.log(
-                logging.ERROR if isinstance(err, KepcoOnProtocolError) else logging.WARNING,
+                logging.ERROR
+                if isinstance(err, KepcoOnConnectionError | KepcoOnProtocolError)
+                else logging.WARNING,
                 "KEPCO ON config flow failed during %s (%s): %s",
                 validation_stage,
                 type(err).__name__,
