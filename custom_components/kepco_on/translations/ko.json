@@ -231,7 +231,10 @@
         "name": "원단위 절사 금액"
       },
       "co2_estimate": {
-        "name": "추정 CO2 배출량"
+        "name": "온실가스 배출량"
+      },
+      "neighbor_usage_comparison": {
+        "name": "이웃 전기사용량 비교"
       }
     }
   }
