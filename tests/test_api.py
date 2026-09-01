@@ -16,7 +16,7 @@ from typing import Any, Self, cast
 
 import custom_components.kepco_on.api as kepco_api
 import pytest
-from aiohttp import ClientSession, ClientTimeout, TCPConnector, web
+from aiohttp import ClientConnectionError, ClientSession, ClientTimeout, TCPConnector, web
 from aresponses import Response, ResponsesMockServer
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -641,12 +641,52 @@ async def test_transport_does_not_unbounded_read_oversized_5xx_response() -> Non
 
 @pytest.mark.asyncio
 async def test_transport_wraps_network_errors_without_secret_leak() -> None:
-    async with ClientSession() as session:
-        transport = KepcoOnTransport(session, sleep=sleep_recorder)
-        with pytest.raises(KepcoOnConnectionError) as raised:
-            await transport.request_json("/sessionCheck", {"pwdVal": PASSWORD_SECRET})
+    class FailingPostContext:
+        async def __aenter__(self) -> Self:
+            raise ClientConnectionError("simulated DNS failure")
+
+        async def __aexit__(
+            self,
+            exc_type: type[BaseException] | None,
+            exc: BaseException | None,
+            traceback_obj: object,
+        ) -> None:
+            del exc_type, exc, traceback_obj
+
+    class FakeSession:
+        attempts = 0
+
+        def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, object] | None,
+            headers: dict[str, str],
+            timeout: ClientTimeout,
+            allow_redirects: bool,
+        ) -> FailingPostContext:
+            del url, json, headers, timeout
+            assert allow_redirects is False
+            self.attempts += 1
+            return FailingPostContext()
+
+    fake_session = FakeSession()
+    transport = KepcoOnTransport(cast("ClientSession", fake_session), sleep=sleep_recorder)
+
+    with pytest.raises(KepcoOnConnectionError) as raised:
+        await transport.request_json("/sessionCheck", {"pwdVal": PASSWORD_SECRET})
 
     assert PASSWORD_SECRET not in str(raised.value)
+    assert PASSWORD_SECRET not in repr(raised.value)
+    assert PASSWORD_SECRET not in str(raised.value.__cause__)
+    assert PASSWORD_SECRET not in repr(raised.value.__cause__)
+    assert PASSWORD_SECRET not in str(raised.value.__context__)
+    assert PASSWORD_SECRET not in repr(raised.value.__context__)
+    assert PASSWORD_SECRET not in "".join(
+        traceback.format_exception(raised.type, raised.value, raised.tb)
+    )
+    assert fake_session.attempts == 3
+    assert SLEEP_CALLS == [1.0, 2.0]
 
 
 @pytest.mark.asyncio
