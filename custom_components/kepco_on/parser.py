@@ -18,6 +18,7 @@ SUPPORTED_APARTMENT_CONTRACT = "아파트(단일계약)"
 ASCII_INTEGER_PATTERN = re.compile(r"-?(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)")
 ASCII_DATE_PATTERN = re.compile(r"[0-9]{8}")
 ASCII_YEAR_MONTH_PATTERN = re.compile(r"[0-9]{6}")
+ASCII_DAY_OF_MONTH_PATTERN = re.compile(r"[0-9]{2}")
 
 
 def parse_int(value: object, field_name: str) -> int | None:
@@ -73,6 +74,23 @@ def parse_year_month(value: object, field_name: str) -> str | None:
     month = int(normalized[4:6])
     if month < 1 or month > 12:
         raise KepcoOnProtocolError(f"{field_name} must contain a valid month")
+    return normalized
+
+
+def parse_day_of_month(value: object, field_name: str) -> str | None:
+    """Parse strict 01-31 day-of-month strings."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise KepcoOnProtocolError(f"{field_name} must be a DD string")
+    normalized = value.strip()
+    if normalized == "" or normalized.lower() == "null":
+        return None
+    if normalized != value or not ASCII_DAY_OF_MONTH_PATTERN.fullmatch(normalized):
+        raise KepcoOnProtocolError(f"{field_name} must be a DD string")
+    day = int(normalized)
+    if day < 1 or day > 31:
+        raise KepcoOnProtocolError(f"{field_name} must contain a valid day")
     return normalized
 
 
@@ -151,6 +169,9 @@ def parse_bill(payload: dict[str, object], requested_month: str | None) -> Kepco
         ),
         previous_meter_reading=parse_int(
             _field(result, payload, "DO_BEF_MTR_ALW", "BF_MR_VAL"), "previous_meter_reading"
+        ),
+        meter_reading_day=parse_day_of_month(
+            _field(result, payload, "DO_GUMCHM_DD", "MR_DD"), "meter_reading_day"
         ),
         amount_krw=parse_int(_field(result, payload, "DO_PRE_REQ_BILL", "BILL_AMT"), "amount_krw"),
         charge=KepcoChargeBreakdown(
@@ -337,6 +358,7 @@ __all__ = [
     "parse_bill",
     "parse_customers",
     "parse_date",
+    "parse_day_of_month",
     "parse_int",
     "parse_year_month",
 ]

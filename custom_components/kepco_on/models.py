@@ -118,6 +118,7 @@ class KepcoBill:
     apartment_average_kwh: int | None = None
     current_meter_reading: int | None = None
     previous_meter_reading: int | None = None
+    meter_reading_day: str | None = None
     amount_krw: int | None = None
     charge: KepcoChargeBreakdown = field(default_factory=KepcoChargeBreakdown)
     history: tuple[KepcoUsageHistoryPoint, ...] = ()

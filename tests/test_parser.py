@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 import pytest
+from custom_components.kepco_on import parser
 from custom_components.kepco_on.exceptions import KepcoOnNoCustomersError, KepcoOnProtocolError
 from custom_components.kepco_on.models import KepcoCoordinatorData
 from custom_components.kepco_on.parser import (
@@ -94,6 +95,20 @@ def test_parse_year_month_is_strict() -> None:
 
     with pytest.raises(KepcoOnProtocolError):
         parse_year_month("202613", "bill_month")
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [("01", "01"), ("31", "31"), ("", None), ("null", None), (None, None)],
+)
+def test_parse_day_of_month_accepts_kepco_day_shapes(value: object, expected: str | None) -> None:
+    assert parser.parse_day_of_month(value, "meter_reading_day") == expected
+
+
+@pytest.mark.parametrize("value", ["00", "32", "1", " 01 ", 1, "\uff10\uff11"])
+def test_parse_day_of_month_rejects_invalid_protocol_values(value: object) -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parser.parse_day_of_month(value, "meter_reading_day")
 
 
 @pytest.mark.parametrize("value", ["\uff12\uff10\uff12\uff16\uff10\uff17", "2026\uff107"])
@@ -187,6 +202,7 @@ def test_parse_latest_bill_extracts_all_governing_values() -> None:
     assert bill.apartment_average_kwh == 284
     assert bill.current_meter_reading == 23139
     assert bill.previous_meter_reading == 22566
+    assert bill.meter_reading_day == "01"
     assert bill.amount_krw == 96330
     assert bill.charge.subtotal_krw == 85484
     assert bill.charge.base_krw == 6060
@@ -216,6 +232,7 @@ def test_parse_requested_bill_uses_requested_month_over_response_month() -> None
     assert bill.apartment_average_kwh == 185
     assert bill.current_meter_reading == 22566
     assert bill.previous_meter_reading == 22160
+    assert bill.meter_reading_day == "01"
     assert bill.amount_krw == 59720
     assert bill.charge.subtotal_krw == 52997
     assert bill.charge.base_krw == 6060
