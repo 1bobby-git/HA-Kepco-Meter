@@ -33,17 +33,30 @@ def _test_requirements() -> dict[str, Requirement]:
 def test_manifest_matches_integration_contract() -> None:
     manifest = json.loads((ROOT / "custom_components/kepco_on/manifest.json").read_text())
 
+    assert list(manifest) == [
+        "domain",
+        "name",
+        "codeowners",
+        "config_flow",
+        "documentation",
+        "integration_type",
+        "iot_class",
+        "issue_tracker",
+        "requirements",
+        "version",
+    ]
+
     assert manifest == {
         "domain": "kepco_on",
         "name": "KEPCO ON",
-        "version": "0.1.0",
+        "codeowners": ["@1bobby-git"],
         "config_flow": True,
+        "documentation": "https://github.com/1bobby-git/HA-Kepco-Meter",
         "integration_type": "hub",
         "iot_class": "cloud_polling",
-        "requirements": [],
-        "codeowners": ["@1bobby-git"],
-        "documentation": "https://github.com/1bobby-git/HA-Kepco-Meter",
         "issue_tracker": "https://github.com/1bobby-git/HA-Kepco-Meter/issues",
+        "requirements": [],
+        "version": "0.1.0",
     }
 
 

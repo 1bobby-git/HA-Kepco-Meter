@@ -774,4 +774,6 @@ def test_entity_translations_have_json_parity() -> None:
     assert set(korean["entity"]["sensor"]) == expected_keys
     for language in (strings, english, korean):
         for key in expected_keys:
-            assert language["entity"]["sensor"][key]["name"]
+            sensor_translation = language["entity"]["sensor"][key]
+            assert set(sensor_translation) == {"name"}
+            assert sensor_translation["name"]

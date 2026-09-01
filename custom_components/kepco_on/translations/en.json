@@ -168,92 +168,70 @@
   "entity": {
     "sensor": {
       "monthly_usage": {
-        "name": "Monthly usage",
-        "description": "Electricity usage for the billing month."
+        "name": "Monthly usage"
       },
       "meter_reading": {
-        "name": "Meter reading",
-        "description": "Current cumulative meter reading."
+        "name": "Meter reading"
       },
       "amount_due": {
-        "name": "Amount due",
-        "description": "Total amount due for the billing month."
+        "name": "Amount due"
       },
       "previous_month_usage": {
-        "name": "Previous month usage",
-        "description": "Electricity usage from the previous billing month."
+        "name": "Previous month usage"
       },
       "last_year_same_month_usage": {
-        "name": "Last year same month usage",
-        "description": "Electricity usage from the same billing month last year."
+        "name": "Last year same month usage"
       },
       "building_average_usage": {
-        "name": "Building average usage",
-        "description": "Average electricity usage for the customer's building."
+        "name": "Building average usage"
       },
       "apartment_average_usage": {
-        "name": "Apartment average usage",
-        "description": "Average electricity usage for the apartment complex."
+        "name": "Apartment average usage"
       },
       "previous_meter_reading": {
-        "name": "Previous meter reading",
-        "description": "Previous cumulative meter reading."
+        "name": "Previous meter reading"
       },
       "billing_month": {
-        "name": "Billing month",
-        "description": "Billing month reported by KEPCO ON."
+        "name": "Billing month"
       },
       "usage_period_start": {
-        "name": "Usage period start",
-        "description": "First day of the electricity usage period."
+        "name": "Usage period start"
       },
       "usage_period_end": {
-        "name": "Usage period end",
-        "description": "Last day of the electricity usage period."
+        "name": "Usage period end"
       },
       "meter_reading_day": {
-        "name": "Meter reading day",
-        "description": "Scheduled day of month for meter reading."
+        "name": "Meter reading day"
       },
       "electricity_subtotal": {
-        "name": "Electricity subtotal",
-        "description": "Electricity charge subtotal before final bill adjustments."
+        "name": "Electricity subtotal"
       },
       "base_charge": {
-        "name": "Base charge",
-        "description": "Base electricity charge."
+        "name": "Base charge"
       },
       "energy_charge": {
-        "name": "Energy charge",
-        "description": "Energy usage charge."
+        "name": "Energy charge"
       },
       "climate_environment_charge": {
-        "name": "Climate environment charge",
-        "description": "Climate and environment charge."
+        "name": "Climate environment charge"
       },
       "fuel_adjustment_charge": {
-        "name": "Fuel adjustment charge",
-        "description": "Fuel cost adjustment charge."
+        "name": "Fuel adjustment charge"
       },
       "child_discount": {
-        "name": "Child discount",
-        "description": "Child household discount amount. Negative values are discounts."
+        "name": "Child discount"
       },
       "vat": {
-        "name": "VAT",
-        "description": "Value-added tax amount."
+        "name": "VAT"
       },
       "power_industry_fund": {
-        "name": "Power industry fund",
-        "description": "Power industry infrastructure fund amount."
+        "name": "Power industry fund"
       },
       "rounding_amount": {
-        "name": "Rounding amount",
-        "description": "Final bill rounding amount."
+        "name": "Rounding amount"
       },
       "co2_estimate": {
-        "name": "Estimated CO2 emissions",
-        "description": "Estimated emissions using the user's configured kg/kWh coefficient."
+        "name": "Estimated CO2 emissions"
       }
     }
   }

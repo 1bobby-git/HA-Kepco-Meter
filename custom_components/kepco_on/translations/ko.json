@@ -168,92 +168,70 @@
   "entity": {
     "sensor": {
       "monthly_usage": {
-        "name": "월 사용량",
-        "description": "청구월의 전력 사용량입니다."
+        "name": "월 사용량"
       },
       "meter_reading": {
-        "name": "계량기 지침",
-        "description": "현재 누적 계량기 지침입니다."
+        "name": "계량기 지침"
       },
       "amount_due": {
-        "name": "청구 금액",
-        "description": "청구월의 최종 청구 금액입니다."
+        "name": "청구 금액"
       },
       "previous_month_usage": {
-        "name": "전월 사용량",
-        "description": "이전 청구월의 전력 사용량입니다."
+        "name": "전월 사용량"
       },
       "last_year_same_month_usage": {
-        "name": "전년 동월 사용량",
-        "description": "작년 같은 청구월의 전력 사용량입니다."
+        "name": "전년 동월 사용량"
       },
       "building_average_usage": {
-        "name": "동 평균 사용량",
-        "description": "해당 동의 평균 전력 사용량입니다."
+        "name": "동 평균 사용량"
       },
       "apartment_average_usage": {
-        "name": "단지 평균 사용량",
-        "description": "아파트 단지의 평균 전력 사용량입니다."
+        "name": "단지 평균 사용량"
       },
       "previous_meter_reading": {
-        "name": "전월 계량기 지침",
-        "description": "이전 누적 계량기 지침입니다."
+        "name": "전월 계량기 지침"
       },
       "billing_month": {
-        "name": "청구월",
-        "description": "한전ON이 반환한 청구월입니다."
+        "name": "청구월"
       },
       "usage_period_start": {
-        "name": "사용 기간 시작일",
-        "description": "전력 사용 기간의 첫날입니다."
+        "name": "사용 기간 시작일"
       },
       "usage_period_end": {
-        "name": "사용 기간 종료일",
-        "description": "전력 사용 기간의 마지막 날입니다."
+        "name": "사용 기간 종료일"
       },
       "meter_reading_day": {
-        "name": "검침일",
-        "description": "월별 예정 검침일입니다."
+        "name": "검침일"
       },
       "electricity_subtotal": {
-        "name": "전기요금 소계",
-        "description": "최종 조정 전 전기요금 소계입니다."
+        "name": "전기요금 소계"
       },
       "base_charge": {
-        "name": "기본요금",
-        "description": "전기 기본요금입니다."
+        "name": "기본요금"
       },
       "energy_charge": {
-        "name": "전력량요금",
-        "description": "전력 사용량에 따른 요금입니다."
+        "name": "전력량요금"
       },
       "climate_environment_charge": {
-        "name": "기후환경요금",
-        "description": "기후환경요금입니다."
+        "name": "기후환경요금"
       },
       "fuel_adjustment_charge": {
-        "name": "연료비조정액",
-        "description": "연료비 조정 요금입니다."
+        "name": "연료비조정액"
       },
       "child_discount": {
-        "name": "자녀 할인",
-        "description": "자녀가구 할인 금액입니다. 음수 값은 할인입니다."
+        "name": "자녀 할인"
       },
       "vat": {
-        "name": "부가가치세",
-        "description": "부가가치세 금액입니다."
+        "name": "부가가치세"
       },
       "power_industry_fund": {
-        "name": "전력산업기반기금",
-        "description": "전력산업기반기금 금액입니다."
+        "name": "전력산업기반기금"
       },
       "rounding_amount": {
-        "name": "원단위 절사 금액",
-        "description": "최종 청구 금액의 원단위 조정 금액입니다."
+        "name": "원단위 절사 금액"
       },
       "co2_estimate": {
-        "name": "추정 CO2 배출량",
-        "description": "사용자가 설정한 kg/kWh 계수로 계산한 추정 배출량입니다."
+        "name": "추정 CO2 배출량"
       }
     }
   }
