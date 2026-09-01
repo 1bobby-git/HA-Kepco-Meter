@@ -9,7 +9,7 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 - 지원: 한전ON 개인 계정(`INDI`), 아파트/오피스텔 세대 단일 계약 요금.
 - 미지원: 법인 계정, 전기공사업체 계정, 인증서 로그인, OACX 간편인증 자동화, CAPTCHA/MFA 우회, Power Planner 실시간 사용량, CO2 실측값.
 - 통신: `https://online.kepco.co.kr`의 고정된 한전ON 경로만 사용하며 TLS 검증을 끄지 않습니다.
-- 버전: 통합 매니페스트 버전은 `0.1.0`입니다. 정식 릴리스 전에는 태그와 HACS 릴리스 패키지를 별도로 검증해야 합니다.
+- 버전: 현재 소스의 통합 매니페스트 버전은 `0.1.1`입니다. 공개 GitHub 릴리스는 아직 `v0.1.0`이 최신이므로, `v0.1.1` 태그와 HACS 릴리스 패키지는 배포 후 별도로 검증해야 합니다.
 
 ## 설치
 
@@ -47,6 +47,7 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 | `amount_due` | 청구 금액 | `KRW` | monetary / 없음 | 활성 |
 | `previous_month_usage` | 전월 사용량 | `kWh` | energy / 없음 | 활성 |
 | `last_year_same_month_usage` | 전년 동월 사용량 | `kWh` | energy / 없음 | 활성 |
+| `neighbor_usage_comparison` | 상태: 월 사용량; 속성: 동 평균, 단지 평균 | `kWh` | energy / 없음 | 활성 |
 | `building_average_usage` | 동 평균 사용량 | `kWh` | energy / 없음 | 활성 |
 | `apartment_average_usage` | 단지 평균 사용량 | `kWh` | energy / 없음 | 활성 |
 
@@ -73,9 +74,13 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 
 | 키 | 출처 | 단위 | 기기/상태 클래스 | 기본값 |
 | --- | --- | --- | --- | --- |
-| `co2_estimate` | 월 사용량 x 사용자 지정 `kg/kWh` 계수 | `kg` | 없음 / 없음 | 생성 안 함 |
+| `co2_estimate` | 월 사용량 x 사용자 지정 `kg/kWh` 계수 | `kg CO₂` | 없음 / 없음 | 생성 안 함 |
 
 CO2 값은 한전ON에서 내려주는 실측 배출량이 아니라 로컬 추정치입니다.
+
+모든 금액 센서는 Home Assistant monetary device class 규칙에 맞춰 ISO 4217 통화 코드 `KRW`를 단위로 사용합니다. 한국어 UI에서는 Home Assistant가 이를 원화 기호로 렌더링합니다.
+
+`neighbor_usage_comparison` 기본 센서, 상세 센서 옵션, CO2 추정 옵션이 모두 있는 단일 고객 항목은 활성 엔티티 23개를 생성합니다.
 
 엔티티 ID는 Home Assistant가 설치 환경의 이름 충돌 상태에 따라 정합니다. 고객별 고유 ID도 원본 고객번호가 아니라 계정/고객 정보를 해시한 안정 키이므로 환경마다 다를 수 있습니다.
 
@@ -152,6 +157,21 @@ actions:
 - 일부 세대만 unavailable: 한 세대의 청구 조회 실패는 다른 세대 센서와 분리됩니다.
 - 월 조회 실패: 응답 액션의 `month`는 `YYYYMM`이고 현재월보다 미래이거나 최근 24개월 범위 밖이면 거절됩니다.
 - 프로토콜 변경 수리 이슈: 한전ON 응답 구조가 바뀌면 원본 응답 없이 안전한 오류 분류만 수리 이슈로 표시됩니다.
+- `login bootstrap content type changed`가 보이는 경우: 기존 `v0.1.0` 또는 오래된 설치본에서 로그인 bootstrap 응답을 지나치게 엄격하게 검사했을 수 있습니다. HACS에서 업데이트한 뒤 Home Assistant를 완전히 재시작하고, 설치된 통합 버전이 `0.1.1`인지 확인한 다음 다시 설정하세요.
+
+설치된 매니페스트 버전 확인:
+
+```bash
+cat /config/custom_components/kepco_on/manifest.json
+```
+
+과거 로그인 bootstrap 오류 검색:
+
+```bash
+grep -R "login bootstrap content type changed" /config/home-assistant.log /config/home-assistant.log.1
+```
+
+문제가 계속되면 공개 이슈에는 비밀번호, 쿠키, 토큰, 원본 고객번호, 계약번호, HAR, raw capture를 올리지 마세요. 공유 가능한 자료는 검토 후 민감값을 지운 로그와 `login-schema.safe.json`뿐입니다.
 
 ## 안전한 로그인 스키마 캡처
 
@@ -169,7 +189,7 @@ Home Assistant에서 통합 항목을 삭제하면 이 통합이 소유한 항�
 
 ## 릴리스 체크
 
-릴리스 태그는 매니페스트 `version`, Git 태그, GitHub 릴리스 제목을 일치시킨 뒤 생성합니다. HACS 커스텀 저장소 설치, Hassfest, Home Assistant 실제 로드, HAOS 재시작 복구, 라이브 한전ON 로그인/요금 조회는 아직 최종 릴리스 증거로 수행되지 않았습니다.
+릴리스 태그는 매니페스트 `version`, Git 태그, GitHub 릴리스 제목을 일치시킨 뒤 생성합니다. 현재 공개 릴리스는 `v0.1.0`이고, 이 브랜치의 소스 메타데이터는 `0.1.1`입니다. `v0.1.1` 릴리스 완료 전에는 HACS가 아직 `0.1.1` 패키지를 제공한다고 문서화하지 않습니다.
 
 ## 라이선스
 
