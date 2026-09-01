@@ -87,8 +87,13 @@ Validated on HAOS 2026.8.3 on 2026-09-01:
 | `kepco_on.get_monthly_bill` response action | Passed |
 | `kepco_on.get_usage_history` response action | Passed |
 | Full Core restart session recovery | Passed |
-| New `neighbor_usage_comparison` sensor on exact `v0.1.1` release deployment | Pending |
-| `kg CO₂` display on exact `v0.1.1` release deployment | Pending |
+| Exact `v0.1.1` tag, GitHub Release, and release ZIP | Passed |
+| Tests, HACS, and Hassfest for the exact release commit | Passed |
+| Exact `v0.1.1` deployment and Core restart | Passed |
+| New `neighbor_usage_comparison` sensor on exact `v0.1.1` release deployment | Passed |
+| `kg CO₂` display on exact `v0.1.1` release deployment | Passed |
+| 23 enabled / 0 disabled KEPCO ON entities after restart | Passed |
+| Live HACS upgrade from `v0.1.0` to `v0.1.1` | Not run; exact release archive was deployed directly |
 | Controlled invalid-password live test | Not run to avoid account-lock risk |
 
 The live result record must not include usernames, raw customer or contract numbers, derived stable keys, addresses, bill values, tokens, cookies, or passwords.
@@ -112,7 +117,7 @@ Run on the target HAOS instance only after confirming its current version, confi
 - Restart Home Assistant and verify session recovery or reauth behavior.
 - Download diagnostics and scan for credential/customer canaries.
 
-For `v0.1.1`, repeat the checklist against the exact released package before marking HACS update and release deployment complete. The 2026-09-01 live run proves the existing HAOS path through restart recovery, but the new comparison sensor and `kg CO₂` rendering remain pending until the exact `v0.1.1` release is deployed.
+The 2026-09-01 exact-release run deployed `v0.1.1`, passed the Core config check and restart, restored 23 enabled KEPCO ON entities with none disabled, and verified the comparison sensor, its two average attributes, kWh usage units, `kg CO₂` display, and currency rendering in the Home Assistant UI. The direct release-archive path is proven; a live HACS upgrade from `v0.1.0` remains a separate untested path.
 
 ## Privacy Scan
 

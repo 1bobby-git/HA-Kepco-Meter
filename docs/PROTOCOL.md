@@ -75,4 +75,4 @@ No raw response body, request body, header set, cookie value, HAR, trace, or scr
 
 ## Runtime Limitations
 
-Live HAOS validation on 2026-09-01 passed for login, customer selection, current bill retrieval, response actions, detailed sensors, CO2 option, and full restart recovery. The controlled invalid-password live branch and long-idle token lifetime remain untested. Public `v0.1.1` tag, GitHub release, HACS update flow, and exact-release deployment proof are still pending.
+Live HAOS validation on 2026-09-01 passed for login, customer selection, current bill retrieval, response actions, detailed sensors, CO2 option, full restart recovery, the neighbor-comparison sensor, and `kg CO₂` rendering. The exact `v0.1.1` tag was deployed and verified with 23 enabled and 0 disabled KEPCO ON entities. The controlled invalid-password live branch, long-idle token lifetime, and a live HACS upgrade from `v0.1.0` remain untested.

@@ -1,7 +1,7 @@
 # KEPCO ON Neighbor Comparison and Unit Design
 
 Date: 2026-09-01  
-Status: Approved design, pending implementation  
+Status: Implemented, released as `v0.1.1`, and verified on HAOS
 Domain: `kepco_on`
 
 ## Goal
