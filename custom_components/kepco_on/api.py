@@ -125,6 +125,32 @@ class KepcoOnTransport:
         self._session = session
         self._sleep = sleep
 
+    async def async_prepare_login_session(self) -> None:
+        """Load the fixed KEPCO page that establishes browser-session cookies."""
+        try:
+            async with self._session.get(
+                PAGE_URL,
+                headers={
+                    "Accept": "text/html,application/xhtml+xml",
+                    "Referer": ORIGIN,
+                },
+                timeout=ClientTimeout(total=30),
+                allow_redirects=False,
+            ) as response:
+                if response.url.scheme != "https" or response.url.host != ONLINE_HOST:
+                    raise _safe_protocol_error("login bootstrap host changed")
+                if response.status != 200:
+                    raise KepcoOnConnectionError("Could not initialize KEPCO ON login session")
+                if not response.headers.get("Content-Type", "").lower().startswith("text/html"):
+                    raise _safe_protocol_error("login bootstrap content type changed")
+                body = await response.content.read(MAX_RESPONSE_BYTES + 1)
+                if len(body) > MAX_RESPONSE_BYTES:
+                    raise _safe_protocol_error("login bootstrap response was too large")
+        except KepcoOnConnectionError, KepcoOnProtocolError:
+            raise
+        except (TimeoutError, ClientError) as err:
+            raise KepcoOnConnectionError("Could not initialize KEPCO ON login session") from err
+
     async def request_json(
         self,
         path: str,

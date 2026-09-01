@@ -242,6 +242,7 @@ class KepcoOnAuth:
             raise KepcoOnAuthError("KEPCO ON username is required to authenticate")
         if not password.strip():
             raise KepcoOnAuthError("KEPCO ON password is required to authenticate")
+        await self._transport.async_prepare_login_session()
         login_payload: JsonObject = {
             "userId": trimmed_username,
             "pwdVal": password,

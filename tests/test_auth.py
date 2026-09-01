@@ -65,6 +65,15 @@ def json_response(payload: Mapping[str, object], *, status: int = 200) -> Respon
     )
 
 
+def html_response() -> Response:
+    return Response(
+        text="<!doctype html><html><body>KEPCO ON</body></html>",
+        status=200,
+        content_type="text/html",
+        charset="UTF-8",
+    )
+
+
 async def request_json(request: web.Request) -> dict[str, object]:
     return cast("dict[str, object]", json.loads((await request.read()).decode()))
 
@@ -118,6 +127,7 @@ async def auth_context(
     reauth_username: str | None = USERNAME_SECRET,
     reauth_password: str | None = PASSWORD_SECRET,
 ) -> AsyncIterator[KepcoOnAuth]:
+    server.add(HOST, "/MYM001D00", "get", response=html_response(), repeat=100)
     await server.__aenter__()
     session = ClientSession()
     try:
@@ -170,6 +180,50 @@ async def test_login_posts_exact_body_headers_and_saves_session() -> None:
     assert headers["submissionid"] == "mf_login_popup_wframe_sbm_submission4"
     assert session.refresh_token == REFRESH_SECRET
     assert store.saved == [session]
+
+
+@pytest.mark.asyncio
+async def test_login_bootstraps_browser_session_before_sending_credentials() -> None:
+    order: list[str] = []
+
+    async def bootstrap_route(request: web.Request) -> Response:
+        order.append("bootstrap")
+        assert request.path == "/MYM001D00"
+        assert "text/html" in request.headers["Accept"]
+        assert request.headers["Referer"] == "https://online.kepco.co.kr/"
+        assert "submissionid" not in request.headers
+        assert "refreshToken" not in request.headers
+        return html_response()
+
+    async def login_route(request: web.Request) -> Response:
+        order.append("login")
+        return json_response(
+            {
+                "result": "YES",
+                "token": "TOKEN_SECRET_CANARY",
+                "refreshToken": REFRESH_SECRET,
+                "userId": "USER_ID_SECRET_CANARY",
+                "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+            }
+        )
+
+    server = ResponsesMockServer()
+    server.add(HOST, "/MYM001D00", "get", response=bootstrap_route)
+    server.add(HOST, "/cyb/me/login/indi/api", "post", response=login_route)
+    await server.__aenter__()
+    client_session = ClientSession()
+    try:
+        auth = KepcoOnAuth(
+            client_session,
+            store=MemorySessionStore(),
+            clock=lambda: datetime(2026, 9, 1, tzinfo=UTC),
+        )
+        await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+    finally:
+        await client_session.close()
+        await server.__aexit__(None, None, None)
+
+    assert order == ["bootstrap", "login"]
 
 
 @pytest.mark.asyncio
