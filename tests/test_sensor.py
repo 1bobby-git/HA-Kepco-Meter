@@ -809,11 +809,22 @@ def test_entity_translations_have_json_parity() -> None:
         "power_industry_fund",
         "rounding_amount",
         "co2_estimate",
+        "neighbor_usage_comparison",
     }
 
     assert english["entity"] == strings["entity"]
     assert set(strings["entity"]["sensor"]) == expected_keys
     assert set(korean["entity"]["sensor"]) == expected_keys
+    assert strings["entity"]["sensor"]["neighbor_usage_comparison"] == {
+        "name": "Neighbor electricity usage comparison"
+    }
+    assert english["entity"]["sensor"]["neighbor_usage_comparison"] == {
+        "name": "Neighbor electricity usage comparison"
+    }
+    assert korean["entity"]["sensor"]["neighbor_usage_comparison"] == {
+        "name": "이웃 전기사용량 비교"
+    }
+    assert korean["entity"]["sensor"]["co2_estimate"] == {"name": "온실가스 배출량"}
     for language in (strings, english, korean):
         for key in expected_keys:
             sensor_translation = language["entity"]["sensor"][key]

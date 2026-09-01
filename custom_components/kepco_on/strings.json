@@ -232,6 +232,9 @@
       },
       "co2_estimate": {
         "name": "Estimated CO2 emissions"
+      },
+      "neighbor_usage_comparison": {
+        "name": "Neighbor electricity usage comparison"
       }
     }
   }
