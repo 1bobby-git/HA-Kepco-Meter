@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import traceback
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
@@ -14,6 +15,7 @@ import pytest
 import voluptuous as vol
 from custom_components.kepco_on.const import DOMAIN, OPT_HISTORY_MONTHS
 from custom_components.kepco_on.exceptions import (
+    KepcoOnConnectionError,
     KepcoOnProtocolError,
     KepcoOnSessionExpired,
 )
@@ -228,6 +230,26 @@ async def call_action(
     return response
 
 
+def assert_safe_exception_and_response(
+    err: BaseException,
+    response: Mapping[str, Any] | None = None,
+) -> None:
+    """Assert service failures do not retain or render sensitive data."""
+    assert err.__cause__ is None
+    assert err.__context__ is None
+    rendered = "\n".join(
+        (
+            str(err),
+            repr(err),
+            "".join(traceback.format_exception(err)),
+            json.dumps(response or {}),
+        )
+    )
+    assert TOKEN_SECRET not in rendered
+    assert RAW_CUSTOMER_SECRET not in rendered
+    assert RAW_HOUSE_SECRET not in rendered
+
+
 @pytest.mark.asyncio
 async def test_async_setup_registers_response_actions_without_entries_idempotently() -> None:
     hass = FakeHass()
@@ -370,7 +392,7 @@ async def test_customer_validation_allows_only_selected_stable_keys() -> None:
 
     assert raised.value.translation_domain == DOMAIN
     assert raised.value.translation_key == "invalid_customer"
-    assert RAW_CUSTOMER_SECRET not in repr(raised.value)
+    assert_safe_exception_and_response(raised.value)
 
 
 @pytest.mark.asyncio
@@ -508,31 +530,49 @@ async def test_get_usage_history_fetches_when_month_supplied_or_latest_missing()
 
 
 @pytest.mark.asyncio
-async def test_api_errors_raise_translated_safe_failure_without_secret_leakage() -> None:
+@pytest.mark.parametrize(
+    ("service", "payload", "client_results"),
+    [
+        (
+            "get_monthly_bill",
+            {"month": "202608"},
+            [KepcoOnProtocolError(f"bad {TOKEN_SECRET} {RAW_CUSTOMER_SECRET}")],
+        ),
+        (
+            "get_usage_history",
+            {"month": "202608"},
+            [KepcoOnConnectionError(f"down {TOKEN_SECRET} {RAW_CUSTOMER_SECRET}")],
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_api_errors_raise_translated_safe_failure_without_secret_leakage(
+    service: str,
+    payload: Mapping[str, Any],
+    client_results: list[KepcoBill | Exception],
+) -> None:
     selected = customer("selected-key")
-    client = FakeClient([KepcoOnProtocolError(f"bad {TOKEN_SECRET} {RAW_CUSTOMER_SECRET}")])
+    client = FakeClient(client_results)
     entry = FakeConfigEntry(runtime_data=runtime((selected,), client))
     hass = FakeHass({entry.entry_id: entry})
     await setup_services(hass)
+    response: dict[str, Any] | None = None
 
     with pytest.raises(HomeAssistantError) as raised:
-        await call_action(
-            hass.services.registered[(DOMAIN, "get_monthly_bill")],
+        response = await call_action(
+            hass.services.registered[(DOMAIN, service)],
             hass,
-            "get_monthly_bill",
+            service,
             {
                 "config_entry_id": entry.entry_id,
                 "customer_id": selected.stable_key,
-                "month": "202608",
+                **payload,
             },
         )
 
     assert raised.value.translation_domain == DOMAIN
     assert raised.value.translation_key == "service_failed"
-    assert TOKEN_SECRET not in repr(raised.value)
-    assert RAW_CUSTOMER_SECRET not in repr(raised.value)
-    assert raised.value.__cause__ is None
-    assert raised.value.__suppress_context__ is True
+    assert_safe_exception_and_response(raised.value, response)
 
 
 @pytest.mark.asyncio
@@ -556,7 +596,7 @@ async def test_auth_expiry_is_reported_as_safe_service_failure() -> None:
         )
 
     assert raised.value.translation_key == "service_failed"
-    assert TOKEN_SECRET not in repr(raised.value)
+    assert_safe_exception_and_response(raised.value)
 
 
 def test_services_yaml_and_translations_have_action_metadata_parity() -> None:

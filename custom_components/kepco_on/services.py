@@ -34,8 +34,16 @@ def _now() -> datetime:
 def _response_error(translation_key: str) -> HomeAssistantError:
     """Return a translated service error without sensitive exception text."""
     if translation_key in _SERVICE_ERROR_KEYS:
-        return ServiceValidationError(translation_domain=DOMAIN, translation_key=translation_key)
-    return HomeAssistantError(translation_domain=DOMAIN, translation_key=translation_key)
+        return ServiceValidationError(
+            translation_key,
+            translation_domain=DOMAIN,
+            translation_key=translation_key,
+        )
+    return HomeAssistantError(
+        translation_key,
+        translation_domain=DOMAIN,
+        translation_key=translation_key,
+    )
 
 
 def _validate_month(month: object, *, required: bool) -> str | None:
@@ -161,10 +169,16 @@ async def _async_get_monthly_bill(call: ServiceCall) -> dict[str, Any]:
     entry = _entry_from_call(call.hass, call.data[ATTR_CONFIG_ENTRY_ID])
     customer = _customer_from_entry(entry, call.data[ATTR_CUSTOMER_ID])
     month = _validate_month(call.data[ATTR_MONTH], required=True)
+    bill: KepcoBill | None = None
+    service_failed = False
     try:
         bill = await entry.runtime_data.client.async_get_bill(customer, month)
     except KepcoOnError:
-        raise _response_error("service_failed") from None
+        service_failed = True
+    if service_failed:
+        raise _response_error("service_failed")
+    if bill is None:
+        raise _response_error("service_failed")
     return _serialize_bill(bill)
 
 
@@ -179,10 +193,15 @@ async def _async_get_usage_history(call: ServiceCall) -> dict[str, Any]:
         data = cast("KepcoCoordinatorData", entry.runtime_data.coordinator.data)
         bill = data.bills_by_customer_key.get(customer.stable_key)
     if bill is None:
+        service_failed = False
         try:
             bill = await entry.runtime_data.client.async_get_bill(customer, month)
         except KepcoOnError:
-            raise _response_error("service_failed") from None
+            service_failed = True
+        if service_failed:
+            raise _response_error("service_failed")
+        if bill is None:
+            raise _response_error("service_failed")
     return _serialize_history(bill, _history_months(entry))
 
 
