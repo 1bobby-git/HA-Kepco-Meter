@@ -115,6 +115,8 @@ def bill(
     usage_kwh: int | None = 573,
     amount_krw: int | None = 96330,
     child_discount_krw: int | None = -16000,
+    building_average_kwh: int | None = 363,
+    apartment_average_kwh: int | None = 284,
 ) -> KepcoBill:
     """Return a synthetic bill with every sensor-backed field populated."""
     return KepcoBill(
@@ -124,8 +126,8 @@ def bill(
         usage_kwh=usage_kwh,
         previous_usage_kwh=406,
         last_year_usage_kwh=612,
-        building_average_kwh=363,
-        apartment_average_kwh=284,
+        building_average_kwh=building_average_kwh,
+        apartment_average_kwh=apartment_average_kwh,
         current_meter_reading=23139,
         previous_meter_reading=22566,
         meter_reading_day="01",
@@ -245,6 +247,7 @@ async def test_default_sensors_have_exact_count_metadata_values_and_privacy() ->
         "amount_due",
         "previous_month_usage",
         "last_year_same_month_usage",
+        "neighbor_usage_comparison",
         "building_average_usage",
         "apartment_average_usage",
         "previous_meter_reading",
@@ -262,7 +265,7 @@ async def test_default_sensors_have_exact_count_metadata_values_and_privacy() ->
         "power_industry_fund",
         "rounding_amount",
     }
-    assert len(entities) == 21
+    assert len(entities) == 22
 
     default_enabled = {
         "monthly_usage",
@@ -270,6 +273,7 @@ async def test_default_sensors_have_exact_count_metadata_values_and_privacy() ->
         "amount_due",
         "previous_month_usage",
         "last_year_same_month_usage",
+        "neighbor_usage_comparison",
         "building_average_usage",
         "apartment_average_usage",
     }
@@ -302,6 +306,24 @@ async def test_default_sensors_have_exact_count_metadata_values_and_privacy() ->
     assert sensors["amount_due"].state_class is None
     assert sensors["previous_month_usage"].state_class is None
     assert sensors["last_year_same_month_usage"].state_class is None
+    assert sensors["neighbor_usage_comparison"].native_value == 573
+    assert (
+        sensors["neighbor_usage_comparison"].native_unit_of_measurement
+        == UnitOfEnergy.KILO_WATT_HOUR
+    )
+    assert sensors["neighbor_usage_comparison"].device_class == SensorDeviceClass.ENERGY
+    assert sensors["neighbor_usage_comparison"].state_class is None
+    assert sensors["neighbor_usage_comparison"].extra_state_attributes == {
+        "billing_month": "202608",
+        "usage_period_start": date(2026, 7, 1),
+        "usage_period_end": date(2026, 7, 31),
+        "same_building_average_kwh": 363,
+        "apartment_average_kwh": 284,
+    }
+    rendered = repr(sensors["neighbor_usage_comparison"].extra_state_attributes)
+    assert RAW_CUSTOMER_SECRET not in rendered
+    assert RAW_HOUSE_SECRET not in rendered
+    assert RAW_NAME_SECRET not in rendered
     assert sensors["building_average_usage"].state_class is None
     assert sensors["apartment_average_usage"].state_class is None
     assert sensors["usage_period_start"].device_class == SensorDeviceClass.DATE
@@ -346,6 +368,26 @@ async def test_attributes_only_include_non_null_billing_context() -> None:
 
 
 @pytest.mark.asyncio
+async def test_neighbor_usage_comparison_keeps_usage_when_neighbor_averages_missing() -> None:
+    sensors = by_key(
+        await setup_entities(
+            bills_by_customer_key={
+                "cust-a": bill(building_average_kwh=None, apartment_average_kwh=None)
+            }
+        )
+    )
+
+    assert sensors["neighbor_usage_comparison"].native_value == 573
+    assert sensors["neighbor_usage_comparison"].extra_state_attributes == {
+        "billing_month": "202608",
+        "usage_period_start": date(2026, 7, 1),
+        "usage_period_end": date(2026, 7, 31),
+        "same_building_average_kwh": None,
+        "apartment_average_kwh": None,
+    }
+
+
+@pytest.mark.asyncio
 async def test_multiple_customers_and_partial_failure_availability_are_isolated() -> None:
     customers = (customer("cust-a"), customer("cust-b"))
     entities = await setup_entities(
@@ -356,8 +398,8 @@ async def test_multiple_customers_and_partial_failure_availability_are_isolated(
     successful = [entity for entity in entities if entity.unique_id.startswith("cust-a_")]
     failed = [entity for entity in entities if entity.unique_id.startswith("cust-b_")]
 
-    assert len(successful) == 21
-    assert len(failed) == 21
+    assert len(successful) == 22
+    assert len(failed) == 22
     assert {entity.available for entity in successful} == {True}
     assert {entity.available for entity in failed} == {False}
     assert {entity.native_value for entity in failed} == {None}
@@ -411,7 +453,7 @@ async def test_co2_sensor_is_optional_estimated_and_decimal_rounded() -> None:
         )
     )
     assert sensors["co2_estimate"].native_value == 263
-    assert sensors["co2_estimate"].native_unit_of_measurement == "kg"
+    assert sensors["co2_estimate"].native_unit_of_measurement == "kg CO₂"
     assert sensors["co2_estimate"].translation_key == "co2_estimate"
     assert sensors["co2_estimate"].entity_description.entity_registry_enabled_default is True
     assert sensors["co2_estimate"].state_class is None

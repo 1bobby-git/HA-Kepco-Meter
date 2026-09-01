@@ -35,6 +35,7 @@ from .coordinator import KepcoOnDataUpdateCoordinator
 from .models import KepcoBill, KepcoCustomer
 
 KepcoSensorValue = str | int | date | None
+KepcoSensorAttributes = dict[str, str | date | int | None]
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -42,6 +43,7 @@ class KepcoSensorEntityDescription(SensorEntityDescription):
     """Describe one KEPCO ON sensor value."""
 
     value_fn: Callable[[KepcoBill, dict[str, Any]], KepcoSensorValue]
+    attributes_fn: Callable[[KepcoBill], KepcoSensorAttributes] | None = None
 
 
 def _usage(field: str) -> Callable[[KepcoBill, dict[str, Any]], KepcoSensorValue]:
@@ -84,6 +86,14 @@ def _co2_estimate(bill: KepcoBill, options: dict[str, Any]) -> int | None:
     return round(estimate)
 
 
+def _neighbor_usage_attributes(bill: KepcoBill) -> KepcoSensorAttributes:
+    """Return safe aggregate neighbor comparison attributes."""
+    return {
+        "same_building_average_kwh": bill.building_average_kwh,
+        "apartment_average_kwh": bill.apartment_average_kwh,
+    }
+
+
 DEFAULT_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
     KepcoSensorEntityDescription(
         key="monthly_usage",
@@ -120,6 +130,14 @@ DEFAULT_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=_usage("last_year_usage_kwh"),
+    ),
+    KepcoSensorEntityDescription(
+        key="neighbor_usage_comparison",
+        translation_key="neighbor_usage_comparison",
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        value_fn=_usage("usage_kwh"),
+        attributes_fn=_neighbor_usage_attributes,
     ),
     KepcoSensorEntityDescription(
         key="building_average_usage",
@@ -235,7 +253,7 @@ DETAIL_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
 CO2_SENSOR_DESCRIPTION = KepcoSensorEntityDescription(
     key="co2_estimate",
     translation_key="co2_estimate",
-    native_unit_of_measurement="kg",
+    native_unit_of_measurement="kg CO₂",
     value_fn=_co2_estimate,
 )
 DETAIL_SENSOR_KEYS = frozenset(description.key for description in DETAIL_SENSOR_DESCRIPTIONS)
@@ -264,6 +282,7 @@ def _description_with_enabled_default(
         state_class=description.state_class,
         entity_registry_enabled_default=enabled_default,
         value_fn=description.value_fn,
+        attributes_fn=description.attributes_fn,
     )
 
 
@@ -344,16 +363,18 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         return self.entity_description.value_fn(bill, self._options)
 
     @property
-    def extra_state_attributes(self) -> dict[str, str | date]:
+    def extra_state_attributes(self) -> KepcoSensorAttributes:
         """Return non-sensitive billing context attributes."""
         bill = self.coordinator.data.bills_by_customer_key.get(self.customer.stable_key)
         if bill is None:
             return {}
-        attributes: dict[str, str | date] = {"billing_month": bill.bill_month}
+        attributes: KepcoSensorAttributes = {"billing_month": bill.bill_month}
         if bill.period_start is not None:
             attributes["usage_period_start"] = bill.period_start
         if bill.period_end is not None:
             attributes["usage_period_end"] = bill.period_end
+        if self.entity_description.attributes_fn is not None:
+            attributes.update(self.entity_description.attributes_fn(bill))
         return attributes
 
 
