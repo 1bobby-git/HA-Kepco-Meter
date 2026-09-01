@@ -43,6 +43,10 @@ from custom_components.kepco_on.exceptions import (
     KepcoOnUnsupportedAccount,
 )
 from custom_components.kepco_on.models import KepcoAccountSession, KepcoCustomer
+from homeassistant.config_entries import (
+    ConfigEntryState,
+    OptionsFlowManager,
+)
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.helpers.redact import REDACTED, async_redact_data
 from homeassistant.helpers.typing import UNDEFINED
@@ -75,9 +79,13 @@ class FakeConfigEntries:
 
     def __init__(self) -> None:
         self.flow = FakeFlowManager()
+        self.entries_by_id: dict[str, FakeConfigEntry] = {}
         self.entries_by_unique_id: dict[str, FakeConfigEntry] = {}
         self.updates: list[tuple[FakeConfigEntry, dict[str, Any]]] = []
         self.reloads: list[str] = []
+
+    def async_get_known_entry(self, entry_id: str) -> FakeConfigEntry:
+        return self.entries_by_id[entry_id]
 
     def async_entry_for_domain_unique_id(
         self, domain: str, unique_id: str
@@ -142,7 +150,7 @@ class FakeConfigEntry:
         self.title = title
         self.entry_id = entry_id
         self.update_listeners: list[Any] = []
-        self.state = None
+        self.state: ConfigEntryState | None = None
         self.source = "user"
         self.runtime_data: Any = None
 
@@ -961,7 +969,8 @@ async def test_reconfigure_loaded_entry_uses_live_customers_and_persists_selecte
         customer("key-3", apartment="새아파트"),
     )
     FakeClient.customer_results = [live_customers]
-    entry.runtime_data = type("Runtime", (), {"client": live_client})()
+    entry.state = ConfigEntryState.LOADED
+    entry.runtime_data = type("Runtime", (), {"client": live_client, "session": FakeSession()})()
     flow = KepcoOnConfigFlow()
     fake_hass = attach_fake_hass(flow)
     flow.handler = DOMAIN
@@ -993,7 +1002,8 @@ async def test_reconfigure_live_refresh_error_allows_retry_with_safe_form_error(
     live_client = FakeClient(cast("Any", object()))
     refreshed = (customer("key-1"), customer("key-2", apartment="별빛아파트"))
     FakeClient.customer_results = [KepcoOnConnectionError(PASSWORD_SECRET), refreshed]
-    entry.runtime_data = type("Runtime", (), {"client": live_client})()
+    entry.state = ConfigEntryState.LOADED
+    entry.runtime_data = type("Runtime", (), {"client": live_client, "session": FakeSession()})()
     flow = KepcoOnConfigFlow()
     attach_fake_hass(flow)
     flow.handler = DOMAIN
@@ -1032,6 +1042,105 @@ async def test_reconfigure_unloaded_entry_falls_back_to_stored_selected_customer
     assert result["type"] == "abort"
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
     assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-2"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "state",
+    [
+        ConfigEntryState.NOT_LOADED,
+        ConfigEntryState.SETUP_ERROR,
+        ConfigEntryState.SETUP_RETRY,
+    ],
+)
+async def test_reconfigure_stale_runtime_state_falls_back_to_stored_customers(
+    state: ConfigEntryState,
+) -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    entry.state = state
+    entry.runtime_data = type(
+        "Runtime",
+        (),
+        {"client": FakeClient(cast("Any", object())), "session": FakeSession()},
+    )()
+    FakeClient.customer_results = [(customer("key-3", apartment="새아파트"),)]
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.handler = DOMAIN
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    shown = await flow.async_step_reconfigure()
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-2"]})
+
+    assert shown["type"] == "form"
+    assert shown["errors"] is None
+    assert result["type"] == "abort"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
+    assert len(FakeClient.customer_results) == 1
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_closed_runtime_session_falls_back_to_stored_customers() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    entry.state = ConfigEntryState.LOADED
+    session = FakeSession()
+    session.closed = True
+    entry.runtime_data = type(
+        "Runtime",
+        (),
+        {"client": FakeClient(cast("Any", object())), "session": session},
+    )()
+    FakeClient.customer_results = [(customer("key-3", apartment="새아파트"),)]
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.handler = DOMAIN
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    shown = await flow.async_step_reconfigure()
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-2"]})
+
+    assert shown["type"] == "form"
+    assert shown["errors"] is None
+    assert result["type"] == "abort"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
+    assert len(FakeClient.customer_results) == 1
+
+
+@pytest.mark.asyncio
+async def test_options_flow_completion_schedules_one_reload() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnOptionsFlow
+
+    entry = make_entry()
+    entry.options = {OPT_POLLING_INTERVAL_HOURS: 12}
+    fake_hass = FakeHass()
+    fake_hass.config_entries.entries_by_id[entry.entry_id] = entry
+    flow = KepcoOnOptionsFlow(cast("Any", entry))
+    flow.handler = entry.entry_id
+    manager = OptionsFlowManager(cast("Any", fake_hass))
+
+    result = await flow.async_step_init(
+        {
+            OPT_POLLING_INTERVAL_HOURS: "6",
+            OPT_ENABLE_DETAILED_SENSORS: True,
+            OPT_ENABLE_CO2_ESTIMATE: True,
+            OPT_CO2_FACTOR_KG_PER_KWH: "0.459",
+            OPT_HISTORY_MONTHS: 18,
+        }
+    )
+    finished = await manager.async_finish_flow(cast("Any", flow), result)
+
+    assert finished is result
+    assert fake_hass.config_entries.reloads == [entry.entry_id]
+    assert entry.update_listeners == []
+    assert entry.options[OPT_POLLING_INTERVAL_HOURS] == 6
 
 
 @pytest.mark.asyncio

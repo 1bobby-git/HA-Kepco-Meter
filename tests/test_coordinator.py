@@ -19,6 +19,10 @@ from custom_components.kepco_on.const import (
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
     DEFAULT_POLLING_INTERVAL_HOURS,
+    OPT_CO2_FACTOR_KG_PER_KWH,
+    OPT_ENABLE_CO2_ESTIMATE,
+    OPT_ENABLE_DETAILED_SENSORS,
+    OPT_HISTORY_MONTHS,
     OPT_POLLING_INTERVAL_HOURS,
     PLATFORMS,
 )
@@ -36,6 +40,7 @@ from custom_components.kepco_on.models import (
     serialize_customer,
 )
 from custom_components.kepco_on.session_store import session_to_payload
+from homeassistant.config_entries import ConfigEntryState, OptionsFlowManager
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import UpdateFailed
@@ -205,27 +210,40 @@ class FakeConfigEntries:
         self.unloaded: list[tuple[FakeConfigEntry, tuple[Any, ...]]] = []
         self.reloads: list[str] = []
         self.updates: list[dict[str, Any]] = []
+        self.entries_by_id: dict[str, FakeConfigEntry] = {}
         self.forward_result = True
         self.unload_result = True
+
+    def async_get_known_entry(self, entry_id: str) -> FakeConfigEntry:
+        return self.entries_by_id[entry_id]
 
     def async_update_entry(
         self,
         entry: FakeConfigEntry,
         *,
         data: Mapping[str, Any] | None = None,
+        options: Mapping[str, Any] | None = None,
         **_: Any,
     ) -> bool:
         if data is not None:
             entry.data = dict(data)
             self.updates.append(dict(data))
+        if options is not None:
+            entry.options = dict(options)
         return True
+
+    def async_schedule_reload(self, entry_id: str) -> None:
+        self.reloads.append(entry_id)
 
     async def async_forward_entry_setups(
         self,
         entry: FakeConfigEntry,
         platforms: tuple[Any, ...],
     ) -> bool:
+        assert entry.runtime_data is not None
         self.forwarded.append((entry, platforms))
+        if not self.forward_result:
+            raise ConfigEntryError("forward failed")
         return self.forward_result
 
     async def async_unload_platforms(
@@ -265,16 +283,18 @@ class FakeConfigEntry:
         self.data = dict(data)
         self.options = dict(options or {})
         self.runtime_data: Any = None
+        self.state = ConfigEntryState.LOADED
         self.unload_callbacks: list[Callable[[], None]] = []
+        self.update_listeners: list[Callable[..., Any]] = []
 
     def async_on_unload(self, func: Callable[[], None]) -> None:
         self.unload_callbacks.append(func)
 
     def add_update_listener(self, listener: Callable[..., Any]) -> Callable[[], None]:
-        del listener
+        self.update_listeners.append(listener)
 
         def remove_listener() -> None:
-            return None
+            self.update_listeners.remove(listener)
 
         return remove_listener
 
@@ -393,7 +413,8 @@ async def test_setup_consumes_handoff_saves_store_and_scrubs_entry_data(
     assert entry.runtime_data.session is reset_fakes[0]
     assert entry.runtime_data.client is FakeClient.instances[0]
     assert entry.runtime_data.session_store is FakeStore.instances[0]
-    assert len(entry.unload_callbacks) == 1
+    assert entry.unload_callbacks == []
+    assert entry.update_listeners == []
 
 
 @pytest.mark.asyncio
@@ -542,15 +563,34 @@ async def test_setup_uses_polling_option_for_coordinator_interval() -> None:
 
 
 @pytest.mark.asyncio
-async def test_update_listener_reloads_entry() -> None:
-    from custom_components.kepco_on import _async_update_listener
+async def test_options_flow_after_setup_schedules_one_reload_without_listener_conflict() -> None:
+    from custom_components.kepco_on import async_setup_entry
+    from custom_components.kepco_on.config_flow import KepcoOnOptionsFlow
 
     hass = FakeHass()
-    entry = make_entry()
+    entry = make_entry(save_password=True)
+    FakeAuth.login_results = [account_session()]
+    assert await async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+    hass.config_entries.entries_by_id[entry.entry_id] = entry
+    flow = KepcoOnOptionsFlow(cast("Any", entry))
+    flow.handler = entry.entry_id
+    manager = OptionsFlowManager(cast("Any", hass))
 
-    await _async_update_listener(cast("Any", hass), cast("Any", entry))
+    result = await flow.async_step_init(
+        {
+            OPT_POLLING_INTERVAL_HOURS: "6",
+            OPT_ENABLE_DETAILED_SENSORS: True,
+            OPT_ENABLE_CO2_ESTIMATE: True,
+            OPT_CO2_FACTOR_KG_PER_KWH: "0.459",
+            OPT_HISTORY_MONTHS: 18,
+        }
+    )
+    finished = await manager.async_finish_flow(cast("Any", flow), result)
 
+    assert finished is result
+    assert entry.update_listeners == []
     assert hass.config_entries.reloads == [entry.entry_id]
+    assert entry.options[OPT_POLLING_INTERVAL_HOURS] == 6
 
 
 @pytest.mark.asyncio
@@ -584,7 +624,7 @@ async def test_unload_keeps_session_open_when_platform_unload_fails() -> None:
 
 
 @pytest.mark.asyncio
-async def test_setup_failure_after_runtime_creation_closes_session(
+async def test_first_refresh_failure_does_not_assign_runtime_and_closes_session(
     reset_fakes: list[FakeSession],
 ) -> None:
     from custom_components.kepco_on import async_setup_entry
@@ -598,6 +638,25 @@ async def test_setup_failure_after_runtime_creation_closes_session(
         await async_setup_entry(cast("Any", hass), cast("Any", entry))
 
     assert reset_fakes[0].closed is True
+    assert entry.runtime_data is None
+
+
+@pytest.mark.asyncio
+async def test_platform_forward_failure_clears_runtime_and_closes_session(
+    reset_fakes: list[FakeSession],
+) -> None:
+    from custom_components.kepco_on import async_setup_entry
+
+    hass = FakeHass()
+    hass.config_entries.forward_result = False
+    entry = make_entry(save_password=True)
+    FakeAuth.login_results = [account_session()]
+
+    with pytest.raises(ConfigEntryError):
+        await async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert reset_fakes[0].closed is True
+    assert entry.runtime_data is None
 
 
 def test_coordinator_default_and_option_intervals() -> None:

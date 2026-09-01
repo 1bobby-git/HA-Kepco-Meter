@@ -12,6 +12,7 @@ from typing import Any
 import voluptuous as vol
 from aiohttp import CookieJar
 from homeassistant import config_entries
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
@@ -160,6 +161,17 @@ def _map_error(err: Exception) -> str:
     if isinstance(err, KepcoOnProtocolError):
         return "protocol_changed"
     return "unknown"
+
+
+def _can_use_live_reconfigure_client(entry: config_entries.ConfigEntry) -> bool:
+    """Return whether the loaded runtime client is usable for reconfigure refresh."""
+    if entry.state is not ConfigEntryState.LOADED:
+        return False
+    runtime_data = getattr(entry, "runtime_data", None)
+    if runtime_data is None:
+        return False
+    session = getattr(runtime_data, "session", None)
+    return not bool(getattr(session, "closed", True))
 
 
 async def _close_session(client_session: Any | None) -> None:
@@ -418,9 +430,13 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._reconfigure_customers is not None:
             return self._reconfigure_customers, None
 
-        runtime_data = getattr(entry, "runtime_data", None)
-        client = getattr(runtime_data, "client", None)
-        if client is not None:
+        if _can_use_live_reconfigure_client(entry):
+            runtime_data = entry.runtime_data
+            client = getattr(runtime_data, "client", None)
+            if client is None:
+                fallback_customers: tuple[KepcoCustomer, ...] | None = stored_customers(entry.data)
+                self._reconfigure_customers = fallback_customers
+                return fallback_customers, None
             try:
                 live_customers: tuple[KepcoCustomer, ...] = tuple(
                     await client.async_get_customers()
@@ -432,9 +448,9 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             self._reconfigure_customers = live_customers
             return live_customers, None
 
-        customers: tuple[KepcoCustomer, ...] | None = stored_customers(entry.data)
-        self._reconfigure_customers = customers
-        return customers, None
+        fallback_customers = stored_customers(entry.data)
+        self._reconfigure_customers = fallback_customers
+        return fallback_customers, None
 
 
 class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):

@@ -51,6 +51,11 @@ async def _close_session(session: ClientSession) -> None:
         await session.close()
 
 
+def _clear_runtime_data(entry: ConfigEntry) -> None:
+    """Clear runtime data without relying on generic ConfigEntry deletion internals."""
+    object.__setattr__(entry, "runtime_data", None)
+
+
 def _has_saved_password(entry: ConfigEntry) -> bool:
     """Return whether a config entry has a stored password."""
     password = entry.data.get(CONF_PASSWORD)
@@ -108,11 +113,6 @@ def _map_setup_error(err: Exception) -> Exception:
     return ConfigEntryError("KEPCO ON setup failed")
 
 
-async def _async_update_listener(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> None:
-    """Reload the entry when options change."""
-    await hass.config_entries.async_reload(entry.entry_id)
-
-
 async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> bool:
     """Set up KEPCO ON from a config entry."""
     client_session = async_create_clientsession(
@@ -121,6 +121,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
         cookie_jar=CookieJar(),
     )
     setup_error: Exception | None = None
+    runtime_assigned = False
     try:
         session_store = KepcoOnSessionStore(hass, entry.entry_id)
         await _consume_session_handoff(hass, entry, session_store)
@@ -135,7 +136,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
         await client.async_get_account_type()
         customers = strict_selected_stored_customers(entry.data)
         coordinator = KepcoOnDataUpdateCoordinator(hass, entry, client, customers)
-        entry.runtime_data = KepcoOnRuntimeData(
+        runtime_data = KepcoOnRuntimeData(
             client=client,
             auth=auth,
             coordinator=coordinator,
@@ -143,12 +144,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
             session=client_session,
         )
         await coordinator.async_config_entry_first_refresh()
+        entry.runtime_data = runtime_data
+        runtime_assigned = True
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        entry.async_on_unload(entry.add_update_listener(_async_update_listener))
     except Exception as err:
         setup_error = err
 
     if setup_error is not None:
+        if runtime_assigned:
+            _clear_runtime_data(entry)
         await _close_session(client_session)
         mapped = _map_setup_error(setup_error)
         if mapped is setup_error:
@@ -171,7 +175,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> 
 __all__ = [
     "KepcoOnConfigEntry",
     "KepcoOnRuntimeData",
-    "_async_update_listener",
     "async_setup_entry",
     "async_unload_entry",
 ]
