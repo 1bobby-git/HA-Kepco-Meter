@@ -27,6 +27,7 @@ from .exceptions import (
     KepcoOnUnsupportedAccount,
 )
 from .models import strict_selected_stored_customers
+from .repairs import async_clear_issue, async_create_issue
 from .services import async_setup_services
 from .session_store import KepcoOnSessionStore, session_from_payload
 
@@ -89,6 +90,7 @@ async def _consume_session_handoff(
     except Exception as err:
         error = err
     if error is not None:
+        async_create_issue(hass, entry, "session_restore_failed")
         raise ConfigEntryError("Could not persist KEPCO ON session handoff") from None
 
     updated = dict(entry.data)
@@ -96,10 +98,18 @@ async def _consume_session_handoff(
     hass.config_entries.async_update_entry(entry, data=updated)
 
 
-async def _ensure_authenticated(auth: KepcoOnAuth, entry: ConfigEntry) -> None:
+async def _ensure_authenticated(
+    hass: HomeAssistant,
+    auth: KepcoOnAuth,
+    entry: ConfigEntry,
+) -> None:
     """Restore, validate, or relogin before client use."""
-    restored = await auth.async_restore_session()
-    valid = restored and await auth.async_validate_session()
+    try:
+        restored = await auth.async_restore_session()
+        valid = restored and await auth.async_validate_session()
+    except KepcoOnProtocolError:
+        async_create_issue(hass, entry, "session_restore_failed")
+        raise ConfigEntryError("KEPCO ON session restore failed") from None
     if valid:
         return
     if not _has_saved_password(entry):
@@ -131,18 +141,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
     )
     setup_error: Exception | None = None
     runtime_assigned = False
+    setup_phase = "session_handoff"
     try:
         session_store = KepcoOnSessionStore(hass, entry.entry_id)
         await _consume_session_handoff(hass, entry, session_store)
+        setup_phase = "authenticate"
         auth = KepcoOnAuth(
             client_session,
             store=session_store,
             reauth_username=str(entry.data[CONF_USERNAME]),
             reauth_password=str(entry.data[CONF_PASSWORD]) if _has_saved_password(entry) else None,
         )
-        await _ensure_authenticated(auth, entry)
+        await _ensure_authenticated(hass, auth, entry)
         client = KepcoOnClient(auth, clock=dt_util.now)
+        setup_phase = "account"
         await client.async_get_account_type()
+        setup_phase = "customers"
         customers = strict_selected_stored_customers(entry.data)
         coordinator = KepcoOnDataUpdateCoordinator(hass, entry, client, customers)
         runtime_data = KepcoOnRuntimeData(
@@ -152,6 +166,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
             session_store=session_store,
             session=client_session,
         )
+        setup_phase = "first_refresh"
         await coordinator.async_config_entry_first_refresh()
         entry.runtime_data = runtime_data
         runtime_assigned = True
@@ -160,6 +175,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
         setup_error = err
 
     if setup_error is not None:
+        if isinstance(setup_error, KepcoOnUnsupportedAccount):
+            async_create_issue(hass, entry, "unsupported_account")
+        elif isinstance(setup_error, KepcoOnProtocolError):
+            if setup_phase in {"authenticate", "account"}:
+                async_create_issue(hass, entry, "login_schema_changed")
+            elif setup_phase == "customers":
+                async_create_issue(hass, entry, "customer_schema_changed")
         if runtime_assigned:
             _clear_runtime_data(entry)
         await _close_session(client_session)
@@ -169,6 +191,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
         mapped.__context__ = None
         mapped.__cause__ = None
         raise mapped from None
+
+    for kind in (
+        "login_schema_changed",
+        "customer_schema_changed",
+        "unsupported_account",
+        "session_restore_failed",
+    ):
+        async_clear_issue(hass, entry, kind)
 
     return True
 

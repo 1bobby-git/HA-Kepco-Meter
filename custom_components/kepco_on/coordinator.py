@@ -22,6 +22,7 @@ from .exceptions import (
     KepcoOnSessionExpired,
 )
 from .models import KepcoBill, KepcoCoordinatorData, KepcoCustomer
+from .repairs import async_clear_issue, async_create_issue
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,11 +67,13 @@ class KepcoOnDataUpdateCoordinator(DataUpdateCoordinator[KepcoCoordinatorData]):
         )
         self.client = client
         self.customers = customers
+        self.entry = entry
 
     async def _async_update_data(self) -> KepcoCoordinatorData:
         """Fetch each selected customer's latest bill sequentially."""
         bills: dict[str, KepcoBill] = {}
         errors: dict[str, str] = {}
+        protocol_error_seen = False
         for customer in self.customers:
             try:
                 bills[customer.stable_key] = await self.client.async_get_bill(customer)
@@ -80,11 +83,17 @@ class KepcoOnDataUpdateCoordinator(DataUpdateCoordinator[KepcoCoordinatorData]):
             except (KepcoOnRateLimitError, KepcoOnConnectionError) as err:
                 del err
                 raise UpdateFailed("KEPCO ON temporary connection failure") from None
+            except KepcoOnProtocolError as err:
+                protocol_error_seen = True
+                async_create_issue(self.hass, self.entry, "bill_schema_changed")
+                errors[customer.stable_key] = _safe_customer_error(err)
             except Exception as err:
                 errors[customer.stable_key] = _safe_customer_error(err)
 
         if not bills:
             raise UpdateFailed("No KEPCO ON selected customers updated")
+        if not protocol_error_seen:
+            async_clear_issue(self.hass, self.entry, "bill_schema_changed")
 
         return KepcoCoordinatorData(
             customers=self.customers,

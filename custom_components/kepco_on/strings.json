@@ -143,6 +143,28 @@
       "message": "KEPCO ON could not return the requested data. Try again after the integration refreshes."
     }
   },
+  "issues": {
+    "login_schema_changed": {
+      "title": "KEPCO ON login response changed",
+      "description": "KEPCO ON returned an unexpected login response. The integration may need an update."
+    },
+    "customer_schema_changed": {
+      "title": "KEPCO ON customer response changed",
+      "description": "KEPCO ON returned an unexpected customer response. The integration may need an update."
+    },
+    "bill_schema_changed": {
+      "title": "KEPCO ON bill response changed",
+      "description": "KEPCO ON returned an unexpected bill response for this entry. Some customers may not update until the integration is updated."
+    },
+    "unsupported_account": {
+      "title": "KEPCO ON account type is not supported",
+      "description": "This KEPCO ON entry is not an individual account type supported by the integration."
+    },
+    "session_restore_failed": {
+      "title": "KEPCO ON session restore failed",
+      "description": "The stored KEPCO ON session could not be restored. Reauthentication may be required."
+    }
+  },
   "entity": {
     "sensor": {
       "monthly_usage": {

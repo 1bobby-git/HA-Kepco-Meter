@@ -32,6 +32,7 @@ from custom_components.kepco_on.exceptions import (
     KepcoOnProtocolError,
     KepcoOnRateLimitError,
     KepcoOnSessionExpired,
+    KepcoOnUnsupportedAccount,
 )
 from custom_components.kepco_on.models import (
     KepcoAccountSession,
@@ -305,6 +306,7 @@ class FakeConfigEntry:
 def reset_fakes(monkeypatch: pytest.MonkeyPatch) -> list[FakeSession]:
     """Patch lifecycle dependencies at the integration boundary."""
     import custom_components.kepco_on as init_module
+    import custom_components.kepco_on.coordinator as coordinator_module
 
     sessions: list[FakeSession] = []
 
@@ -339,6 +341,10 @@ def reset_fakes(monkeypatch: pytest.MonkeyPatch) -> list[FakeSession]:
     monkeypatch.setattr(init_module, "KepcoOnAuth", FakeAuth)
     monkeypatch.setattr(init_module, "KepcoOnClient", FakeClient)
     monkeypatch.setattr(init_module, "KepcoOnDataUpdateCoordinator", FakeCoordinator)
+    monkeypatch.setattr(init_module, "async_create_issue", lambda hass, entry, kind: None)
+    monkeypatch.setattr(init_module, "async_clear_issue", lambda hass, entry, kind: None)
+    monkeypatch.setattr(coordinator_module, "async_create_issue", lambda hass, entry, kind: None)
+    monkeypatch.setattr(coordinator_module, "async_clear_issue", lambda hass, entry, kind: None)
     return sessions
 
 
@@ -565,6 +571,143 @@ async def test_setup_protocol_errors_raise_safe_config_entry_error(
 
 
 @pytest.mark.asyncio
+async def test_setup_reports_and_clears_safe_repair_issues(
+    reset_fakes: list[FakeSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on as init_module
+
+    del reset_fakes
+    created: list[tuple[str, str]] = []
+    cleared: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        init_module,
+        "async_create_issue",
+        lambda hass, entry, kind: created.append((entry.entry_id, kind)),
+    )
+    monkeypatch.setattr(
+        init_module,
+        "async_clear_issue",
+        lambda hass, entry, kind: cleared.append((entry.entry_id, kind)),
+    )
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    FakeAuth.login_results = [account_session()]
+    FakeClient.account_results = [KepcoOnUnsupportedAccount(f"corp {TOKEN_SECRET}")]
+
+    with pytest.raises(ConfigEntryError):
+        await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert created == [(entry.entry_id, "unsupported_account")]
+    assert TOKEN_SECRET not in repr(created)
+
+    FakeAuth.login_results = [account_session()]
+    FakeClient.account_results = ["INDI"]
+    FakeCoordinator.refresh_results = [None]
+
+    assert await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+
+    assert cleared == [
+        (entry.entry_id, "login_schema_changed"),
+        (entry.entry_id, "customer_schema_changed"),
+        (entry.entry_id, "unsupported_account"),
+        (entry.entry_id, "session_restore_failed"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_setup_reports_protocol_phase_repairs_without_raw_exception_data(
+    reset_fakes: list[FakeSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on as init_module
+
+    del reset_fakes
+    created: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        init_module,
+        "async_create_issue",
+        lambda hass, entry, kind: created.append((entry.entry_id, kind)),
+    )
+    monkeypatch.setattr(init_module, "async_clear_issue", lambda hass, entry, kind: None)
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    FakeAuth.login_results = [KepcoOnProtocolError(f"login changed {TOKEN_SECRET}")]
+
+    with pytest.raises(ConfigEntryError) as error:
+        await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert created == [(entry.entry_id, "login_schema_changed")]
+    assert TOKEN_SECRET not in str(error.value)
+    assert TOKEN_SECRET not in repr(created)
+
+
+@pytest.mark.asyncio
+async def test_setup_reports_session_restore_persistence_failure_only(
+    reset_fakes: list[FakeSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on as init_module
+
+    created: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        init_module,
+        "async_create_issue",
+        lambda hass, entry, kind: created.append((entry.entry_id, kind)),
+    )
+    monkeypatch.setattr(init_module, "async_clear_issue", lambda hass, entry, kind: None)
+
+    hass = FakeHass()
+    entry = make_entry(with_handoff=True)
+    FakeStore.save_errors = [RuntimeError(f"store failed {TOKEN_SECRET}")]
+
+    with pytest.raises(ConfigEntryError) as error:
+        await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert created == [(entry.entry_id, "session_restore_failed")]
+    assert TOKEN_SECRET not in str(error.value)
+    assert TOKEN_SECRET not in repr(created)
+    assert reset_fakes[0].closed is True
+
+    created.clear()
+    entry = make_entry()
+    FakeAuth.restore_results = [True]
+    FakeAuth.validate_results = [False]
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert created == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raised", [KepcoOnConnectionError("down"), KepcoOnRateLimitError("slow")])
+async def test_setup_temporary_failures_do_not_create_repairs(
+    reset_fakes: list[FakeSession],
+    monkeypatch: pytest.MonkeyPatch,
+    raised: Exception,
+) -> None:
+    import custom_components.kepco_on as init_module
+
+    del reset_fakes
+    created: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        init_module,
+        "async_create_issue",
+        lambda hass, entry, kind: created.append((entry.entry_id, kind)),
+    )
+    monkeypatch.setattr(init_module, "async_clear_issue", lambda hass, entry, kind: None)
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    FakeAuth.login_results = [raised]
+
+    with pytest.raises(ConfigEntryNotReady):
+        await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert created == []
+
+
+@pytest.mark.asyncio
 async def test_setup_uses_polling_option_for_coordinator_interval() -> None:
     from custom_components.kepco_on import async_setup_entry
 
@@ -741,6 +884,84 @@ async def test_coordinator_preserves_successful_bill_when_one_customer_fails() -
     assert set(data.bills_by_customer_key) == {"key-1"}
     assert data.errors_by_customer_key == {"key-2": "protocol_error"}
     assert TOKEN_SECRET not in repr(data)
+
+
+@pytest.mark.asyncio
+async def test_coordinator_reports_and_clears_bill_schema_repair_issue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on.coordinator as coordinator_module
+    from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
+
+    created: list[tuple[str, str]] = []
+    cleared: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_create_issue",
+        lambda hass, entry, kind: created.append((entry.entry_id, kind)),
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_clear_issue",
+        lambda hass, entry, kind: cleared.append((entry.entry_id, kind)),
+    )
+    client = FakeClient(cast("Any", object()))
+    customers = (customer("key-1"), customer("key-2"))
+    entry = make_entry(customers=customers, selected=["key-1", "key-2"])
+    FakeClient.bill_results = [bill("202608", 111), KepcoOnProtocolError(f"bad {TOKEN_SECRET}")]
+    coordinator = KepcoOnDataUpdateCoordinator(
+        cast("Any", Mock()),
+        cast("Any", entry),
+        cast("Any", client),
+        customers,
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert data.errors_by_customer_key == {"key-2": "protocol_error"}
+    assert created == [(entry.entry_id, "bill_schema_changed")]
+    assert cleared == []
+
+    FakeClient.bill_results = [bill("202609", 111), bill("202609", 222)]
+    data = await coordinator._async_update_data()
+
+    assert data.errors_by_customer_key == {}
+    assert cleared == [(entry.entry_id, "bill_schema_changed")]
+
+
+@pytest.mark.asyncio
+async def test_coordinator_does_not_report_network_or_auth_repairs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on.coordinator as coordinator_module
+    from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
+
+    created: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_create_issue",
+        lambda hass, entry, kind: created.append((entry.entry_id, kind)),
+    )
+    monkeypatch.setattr(
+        coordinator_module,
+        "async_clear_issue",
+        lambda hass, entry, kind: None,
+    )
+
+    for raised in (KepcoOnConnectionError("down"), KepcoOnRateLimitError("slow")):
+        client = FakeClient(cast("Any", object()))
+        FakeClient.bill_results = [raised]
+        coordinator = KepcoOnDataUpdateCoordinator(
+            cast("Any", Mock()),
+            cast("Any", make_entry()),
+            cast("Any", client),
+            (customer("key-1"),),
+        )
+
+        with pytest.raises(UpdateFailed):
+            await coordinator._async_update_data()
+
+    assert created == []
 
 
 @pytest.mark.asyncio

@@ -143,6 +143,28 @@
       "message": "한전ON이 요청한 데이터를 반환하지 못했습니다. 통합구성이 새로 고침된 뒤 다시 시도하세요."
     }
   },
+  "issues": {
+    "login_schema_changed": {
+      "title": "한전ON 로그인 응답 변경",
+      "description": "한전ON 로그인 응답이 예상과 다릅니다. 통합구성 업데이트가 필요할 수 있습니다."
+    },
+    "customer_schema_changed": {
+      "title": "한전ON 고객 응답 변경",
+      "description": "한전ON 고객 응답이 예상과 다릅니다. 통합구성 업데이트가 필요할 수 있습니다."
+    },
+    "bill_schema_changed": {
+      "title": "한전ON 청구 응답 변경",
+      "description": "이 항목의 한전ON 청구 응답이 예상과 다릅니다. 통합구성이 업데이트될 때까지 일부 고객이 갱신되지 않을 수 있습니다."
+    },
+    "unsupported_account": {
+      "title": "지원하지 않는 한전ON 계정 유형",
+      "description": "이 한전ON 항목은 통합구성이 지원하는 개인 계정 유형이 아닙니다."
+    },
+    "session_restore_failed": {
+      "title": "한전ON 세션 복원 실패",
+      "description": "저장된 한전ON 세션을 복원하지 못했습니다. 재인증이 필요할 수 있습니다."
+    }
+  },
   "entity": {
     "sensor": {
       "monthly_usage": {
