@@ -340,7 +340,9 @@ test("safeStringify rejects direct and nested sensitive property values", () => 
     { ADDR: "ADDRESS_SECRET_SHOULD_NOT_WRITE" },
     { USER_MTEL: "PHONE_SECRET_SHOULD_NOT_WRITE" },
     { USER_EMAIL_ADDR: "EMAIL_SECRET_SHOULD_NOT_WRITE" },
+    { name: "REAL_MEMBER_NAME" },
     { nested: { cookie: "COOKIE_SECRET_SHOULD_NOT_WRITE" } },
+    { nested: { name: "REAL_MEMBER_NAME" } },
     { list: [{ token: "abcdefghijklmnopqrstuvwxyz" }] },
     { auth: { value: "AUTH_SECRET_SHOULD_NOT_WRITE" } },
     { session: { id: "SESSION_SECRET_SHOULD_NOT_WRITE" } },
@@ -356,6 +358,7 @@ test("safeStringify permits schema metadata for sensitive field names", () => {
     fields: [
       {
         path: "$.refreshToken",
+        type: "string",
         key: "refreshToken",
         name: "mbrsNm",
         length: 26,
@@ -368,6 +371,28 @@ test("safeStringify permits schema metadata for sensitive field names", () => {
   assert.match(serialized, /"refreshToken"/);
   assert.match(serialized, /"mbrsNm"/);
   assert.match(serialized, /"secret": true/);
+});
+
+test("safeStringify treats lowercase name as schema metadata only in strict metadata objects", () => {
+  const allowed = safeStringify({
+    fields: [
+      {
+        path: "$.mbrsNm",
+        type: "string",
+        name: "mbrsNm",
+        length: 9,
+        secret: true,
+      },
+    ],
+  });
+
+  assert.match(allowed, /"\$\.mbrsNm"/);
+  assert.match(allowed, /"name": "mbrsNm"/);
+  assert.throws(() => safeStringify({ field: { path: "$.mbrsNm", name: "mbrsNm" } }), /Refusing to write/);
+  assert.throws(
+    () => safeStringify({ field: { path: "$.mbrsNm", type: "string", name: "mbrsNm", raw: "unexpected" } }),
+    /Refusing to write/,
+  );
 });
 
 test("temp profile cleanup guard allows only the tool mkdtemp prefix under OS temp", () => {

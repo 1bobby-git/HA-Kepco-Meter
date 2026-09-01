@@ -27,6 +27,7 @@ const SENSITIVE_EXACT_KEYS = new Set([
   "custno",
   "houscntrno",
   "mbrsnm",
+  "name",
   "pwdval",
   "si_cust_no",
   "user_email_addr",
@@ -337,9 +338,12 @@ function findSuspiciousSerializedValues(value, path = "$", findings = []) {
     return findings;
   }
   if (isPlainObject(value)) {
+    if (isSafeSchemaMetadataObject(value)) {
+      return findings;
+    }
     for (const [key, child] of Object.entries(value)) {
       const childPath = jsonPathFor(path, key);
-      if (isSensitivePropertyKey(key) && !isSafeSchemaMetadataValue(child, key)) {
+      if (isSensitivePropertyKey(key)) {
         findings.push(childPath);
         continue;
       }
@@ -357,6 +361,13 @@ function findSuspiciousSerializedValues(value, path = "$", findings = []) {
     }
   }
   return findings;
+}
+
+function isSafeSchemaMetadataObject(value) {
+  if (!isPlainObject(value) || !("path" in value) || !("type" in value)) {
+    return false;
+  }
+  return Object.entries(value).every(([key, child]) => isSafeSchemaMetadataValue(child, key));
 }
 
 function isSafeSchemaMetadataValue(value, key) {
