@@ -12,7 +12,7 @@ from typing import cast
 import pytest
 from aiohttp import ClientSession, web
 from aresponses import Response, ResponsesMockServer
-from custom_components.kepco_on.auth import KepcoOnAuth
+from custom_components.kepco_on.auth import KepcoOnAuth, _safe_value_shape
 from custom_components.kepco_on.exceptions import (
     KepcoOnAuthError,
     KepcoOnProtocolError,
@@ -90,6 +90,24 @@ def assert_no_secret(text: str) -> None:
         "MEMBER_NAME_SECRET_CANARY",
     ):
         assert value not in text
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        (None, "null"),
+        ("", "str:empty"),
+        ("value", "str:nonempty"),
+        (True, "bool"),
+        (1, "number"),
+        (1.5, "number"),
+        ([], "list"),
+        ({}, "object"),
+        (object(), "invalid"),
+    ],
+)
+def test_safe_value_shape_reports_type_and_emptiness_only(value: object, expected: str) -> None:
+    assert _safe_value_shape(value) == expected
 
 
 @asynccontextmanager
