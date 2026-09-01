@@ -22,6 +22,7 @@ from .const import (
     ENDPOINT_SESSION_CHECK,
     ENDPOINT_SSO_CHECK,
     PAGE_URL,
+    VERSION,
 )
 from .exceptions import (
     KepcoOnConnectionError,
@@ -40,6 +41,7 @@ ClockCallback = Callable[[], datetime]
 ONLINE_HOST = "online.kepco.co.kr"
 ORIGIN = "https://online.kepco.co.kr/"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
+USER_AGENT = f"HomeAssistant-KEPCO-ON/{VERSION}"
 TRANSIENT_STATUSES = frozenset({500, 502, 503})
 MAX_RETRY_AFTER_SECONDS = 30.0
 ALLOWED_PATHS = frozenset(
@@ -133,6 +135,7 @@ class KepcoOnTransport:
                 headers={
                     "Accept": "text/html,application/xhtml+xml",
                     "Referer": ORIGIN,
+                    "User-Agent": USER_AGENT,
                 },
                 timeout=ClientTimeout(total=30),
                 allow_redirects=False,
@@ -167,6 +170,7 @@ class KepcoOnTransport:
             "Content-Type": "application/json; charset=UTF-8",
             "Referer": PAGE_URL,
             "Origin": ORIGIN,
+            "User-Agent": USER_AGENT,
         }
         if refresh_token is not None:
             headers["refreshToken"] = refresh_token
