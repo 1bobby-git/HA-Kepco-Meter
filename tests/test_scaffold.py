@@ -112,6 +112,7 @@ def test_gitignore_blocks_capture_and_secret_artifacts() -> None:
         "htmlcov/",
         ".venv/",
         "node_modules/",
+        ".worktrees/",
     ]
 
 
