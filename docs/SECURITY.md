@@ -2,12 +2,14 @@
 
 This integration handles KEPCO ON credentials, account identifiers, customer numbers, contract numbers, session tokens, and cookies. Treat Home Assistant configuration storage and backups as sensitive.
 
+Turning `save_password` off omits only the password from the config entry. Refresh tokens, session identity, and any live-proven cookie snapshot can still be persisted in private Home Assistant Store for restart/session recovery, and expiry can still require reauthentication. The integration does not encrypt Config Entry data, Store data, or Home Assistant backups.
+
 ## Stored Data
 
 | Location | Data | Notes |
 | --- | --- | --- |
 | Config entry | Username, `save_password` flag, optional password, display name, account hash, selected customer hashes, selected raw customer and house contract IDs | Raw IDs are stored only because KEPCO ON bill requests require them. They are not used as entity IDs. |
-| Private Home Assistant Store | Refresh token, optional token, session identity fields, cookie snapshot | Home Assistant Store files are not a secret vault. Backups can contain this data. |
+| Private Home Assistant Store | Refresh token, optional token, session identity fields, any proven cookie snapshot | Home Assistant Store files are not a secret vault. Backups can contain this data even when `save_password` is off. |
 | One-time handoff | Initial login session payload under `CONF_SESSION_HANDOFF` | Setup consumes this into Store and removes it from entry data. Code anchor: `__init__.py:81`, `__init__.py:97`. |
 | Diagnostics | Redacted summaries only | Secret canaries are covered by tests. |
 
@@ -49,4 +51,4 @@ Do not include raw identifiers or account details. If a maintainer needs live re
 
 ## Host and Backup Protection
 
-Protect the Home Assistant host, `.storage`, backups, terminal scrollback, shell history, and any external secret manager. If password storage is enabled, rotate the KEPCO ON password after suspected backup or host exposure. Remove stale `login-schema.safe.json` files after protocol review.
+Protect the Home Assistant host, `.storage`, backups, terminal scrollback, shell history, and any external secret manager. If password storage is enabled, rotate the KEPCO ON password after suspected backup or host exposure. If Store or backup exposure is suspected, assume refresh/session material may also be exposed. Remove stale `login-schema.safe.json` files after protocol review.

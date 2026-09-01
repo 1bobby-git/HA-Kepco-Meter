@@ -22,7 +22,7 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 
 ### 수동 설치
 
-`custom_components/kepco_on` 폴더를 Home Assistant 설정 디렉터리의 `custom_components/kepco_on`에 복사한 뒤 Home Assistant를 재시작합니다.
+`custom_components/kepco_on` 폴더를 Home Assistant 설정 디렉터리의 `/config/custom_components/kepco_on`에 복사한 뒤 Home Assistant를 재시작합니다. `/config`는 File editor 애드온, Samba share, SSH 애드온, 또는 호스트에 마운트된 설정 디렉터리로 접근할 수 있습니다. 재시작 후 통합 목록이 오래된 상태로 보이면 브라우저 캐시를 지우고 다시 열어 보세요.
 
 ## 설정
 
@@ -32,7 +32,9 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 2. 자동 재인증이 필요하면 `비밀번호 저장`을 켭니다.
 3. 조회할 아파트 세대를 선택합니다. 선택 화면에는 개인정보 보호를 위해 아파트명, 동, 호만 표시됩니다.
 
-비밀번호 저장을 켜면 Home Assistant 설정 저장소와 백업 안에 비밀번호가 평문에 가까운 형태로 남을 수 있습니다. Home Assistant의 `.storage`와 백업 파일을 비밀 저장소처럼 보호해야 합니다. 저장하지 않으면 세션 만료 후 재인증 플로우가 필요할 수 있습니다.
+`비밀번호 저장`을 끄면 Config Entry에는 비밀번호만 저장하지 않습니다. 다만 재시작/세션 복구를 위해 refresh token, 세션 식별 정보, 그리고 라이브 검증으로 필요성이 입증된 쿠키 스냅샷은 private Home Assistant Store에 저장될 수 있습니다. 만료되면 재인증이 필요할 수 있습니다.
+
+이 통합은 Config Entry, Store, 백업을 자체 암호화하지 않습니다. 비밀번호 저장 여부와 관계없이 Home Assistant 호스트, `.storage`, 백업 파일을 비밀 저장소처럼 보호하세요.
 
 ## 생성되는 센서
 
@@ -117,7 +119,9 @@ data:
 response_variable: kepco_history
 ```
 
-`customer_id`는 원본 한전 고객번호가 아닙니다. 통합이 생성한 안정 해시 키입니다. 현재 값은 Home Assistant 개발자 도구의 액션 응답, 진단 요약, 또는 엔티티의 고유 ID 접두부에서 확인할 수 있습니다. 공개 이슈나 자동화 예제에는 원본 고객번호, 계약번호, 주소, 이름, 전화번호를 넣지 마세요.
+`config_entry_id`는 개발자 도구 > 액션 또는 자동화 시각 편집기에서 `config_entry_id` 선택기를 열고 KEPCO ON 항목을 선택하면 Home Assistant가 채웁니다. 수동 YAML에 넣어야 할 때는 선택기로 항목을 고른 뒤 YAML 보기로 전환해 생성된 ID를 복사하세요.
+
+`customer_id`는 원본 한전 고객번호가 아니라 통합이 생성한 64자 안정 해시 키입니다. 현재 액션 응답이나 진단 출력은 이 값을 공개 조회용으로 노출하지 않습니다. 안전한 확인 경로는 Settings > Devices & Services > Entities에서 KEPCO ON 센서 엔티티 설정을 열고 entity registry의 unique ID 앞 64자를 확인하는 것입니다. Home Assistant 화면에서 unique ID가 보이지 않는 환경에서는 재구성 화면의 고객 라벨과 엔티티 unique ID를 함께 대조해야 하며, 이 값 확인 UX는 현재 제한 사항입니다. 공개 이슈나 자동화 예제에는 원본 고객번호, 계약번호, 주소, 이름, 전화번호를 넣지 마세요.
 
 ## 자동화 예시
 
@@ -143,7 +147,7 @@ actions:
 ## 문제 해결
 
 - 로그인 실패: 한전ON 웹에서 같은 계정으로 직접 로그인되는지 확인합니다. CAPTCHA, MFA, OACX 등 조건부 챌린지가 나오면 이 통합은 우회하지 않습니다.
-- 세션 만료: 비밀번호 저장을 껐으면 재인증이 필요합니다. 저장을 켰으면 한 번 재로그인 후 요청을 재시도합니다.
+- 세션 만료: 비밀번호 저장을 껐거나 저장된 refresh token/session/cookie가 만료되면 재인증이 필요합니다.
 - 고객 없음: 이 통합은 개인 아파트 세대 계약만 지원합니다.
 - 일부 세대만 unavailable: 한 세대의 청구 조회 실패는 다른 세대 센서와 분리됩니다.
 - 월 조회 실패: 응답 액션의 `month`는 `YYYYMM`이고 현재월보다 미래이거나 최근 24개월 범위 밖이면 거절됩니다.
