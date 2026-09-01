@@ -380,8 +380,11 @@ def _customer_key_from_unique_id(unique_id: str) -> str | None:
     return None
 
 
-def _customer_key_from_device_identifiers(identifiers: set[tuple[str, str]]) -> str | None:
-    for domain, identifier in identifiers:
+def _customer_key_from_device_identifiers(identifiers: Iterable[tuple[str, ...]]) -> str | None:
+    for identifier_tuple in identifiers:
+        if len(identifier_tuple) != 2:
+            continue
+        domain, identifier = identifier_tuple
         if domain == DOMAIN:
             return identifier
     return None
@@ -398,7 +401,7 @@ async def async_remove_config_entry_device(
         customer.stable_key for customer in config_entry.runtime_data.coordinator.data.customers
     }
     customer_key = _customer_key_from_device_identifiers(device_entry.identifiers)
-    return customer_key not in selected_keys
+    return customer_key is not None and customer_key not in selected_keys
 
 
 __all__ = ["async_remove_config_entry_device", "async_setup_entry"]

@@ -428,7 +428,22 @@ async def test_setup_removes_only_stale_entities_and_solely_owned_devices(
 
 
 @pytest.mark.asyncio
-async def test_async_remove_config_entry_device_rejects_selected_customer_device() -> None:
+@pytest.mark.parametrize(
+    ("identifiers", "expected"),
+    [
+        ({(DOMAIN, "cust-a")}, False),
+        ({(DOMAIN, "stale")}, True),
+        ({("other_domain", "stale")}, False),
+        (set(), False),
+        ({("other_domain", "stale"), (DOMAIN, "cust-a")}, False),
+        ({("other_domain", "stale"), (DOMAIN, "stale")}, True),
+        ({(DOMAIN,)}, False),
+        ({(DOMAIN, "stale", "extra")}, False),
+    ],
+)
+async def test_async_remove_config_entry_device_only_removes_stale_kepco_customer_devices(
+    identifiers: set[tuple[str, ...]], expected: bool
+) -> None:
     from custom_components.kepco_on.sensor import async_remove_config_entry_device
 
     coordinator = FakeCoordinator(
@@ -436,34 +451,13 @@ async def test_async_remove_config_entry_device_rejects_selected_customer_device
     )
     config_entry = entry(coordinator=coordinator)
 
-    assert (
-        await async_remove_config_entry_device(
-            cast("Any", object()),
-            cast("Any", config_entry),
-            cast(
-                "Any",
-                SimpleNamespace(
-                    identifiers={(DOMAIN, "cust-a")},
-                    config_entries={"entry-1"},
-                ),
-            ),
-        )
-        is False
+    result = await async_remove_config_entry_device(
+        cast("Any", object()),
+        cast("Any", config_entry),
+        cast("Any", SimpleNamespace(identifiers=identifiers, config_entries={"entry-1"})),
     )
-    assert (
-        await async_remove_config_entry_device(
-            cast("Any", object()),
-            cast("Any", config_entry),
-            cast(
-                "Any",
-                SimpleNamespace(
-                    identifiers={(DOMAIN, "stale")},
-                    config_entries={"entry-1"},
-                ),
-            ),
-        )
-        is True
-    )
+
+    assert result is expected
 
 
 def test_entity_translations_have_json_parity() -> None:
