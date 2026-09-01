@@ -91,6 +91,58 @@
       "unknown": "Unexpected error."
     }
   },
+  "services": {
+    "get_monthly_bill": {
+      "name": "Get monthly bill",
+      "description": "Return one KEPCO ON monthly apartment bill for a selected customer.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "KEPCO ON config entry to use."
+        },
+        "customer_id": {
+          "name": "Customer ID",
+          "description": "Use the stable customer ID from this integration action/docs, not a raw KEPCO customer number."
+        },
+        "month": {
+          "name": "Billing month",
+          "description": "Billing month in YYYYMM format within the supported recent 24-month window."
+        }
+      }
+    },
+    "get_usage_history": {
+      "name": "Get usage history",
+      "description": "Return monthly KEPCO ON usage history for a selected customer.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Config entry",
+          "description": "KEPCO ON config entry to use."
+        },
+        "customer_id": {
+          "name": "Customer ID",
+          "description": "Use the stable customer ID from this integration action/docs, not a raw KEPCO customer number."
+        },
+        "month": {
+          "name": "Billing month",
+          "description": "Optional billing month in YYYYMM format. Leave empty to use the latest coordinator bill when available."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_entry": {
+      "message": "The selected KEPCO ON config entry is not loaded."
+    },
+    "invalid_customer": {
+      "message": "The selected customer ID is not available for this KEPCO ON config entry."
+    },
+    "invalid_month": {
+      "message": "Enter a real YYYYMM month that is not in the future and is within the supported recent 24-month window."
+    },
+    "service_failed": {
+      "message": "KEPCO ON could not return the requested data. Try again after the integration refreshes."
+    }
+  },
   "entity": {
     "sensor": {
       "monthly_usage": {

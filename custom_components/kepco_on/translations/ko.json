@@ -91,6 +91,58 @@
       "unknown": "예상하지 못한 오류입니다."
     }
   },
+  "services": {
+    "get_monthly_bill": {
+      "name": "월별 청구 내역 조회",
+      "description": "선택한 고객의 한전ON 월별 아파트 청구 내역을 반환합니다.",
+      "fields": {
+        "config_entry_id": {
+          "name": "설정 항목",
+          "description": "사용할 한전ON 설정 항목입니다."
+        },
+        "customer_id": {
+          "name": "고객 ID",
+          "description": "한전 고객번호 원문이 아닌 이 통합구성의 액션/문서에서 제공하는 안정 고객 ID를 사용하세요."
+        },
+        "month": {
+          "name": "청구월",
+          "description": "지원되는 최근 24개월 범위 안의 YYYYMM 형식 청구월입니다."
+        }
+      }
+    },
+    "get_usage_history": {
+      "name": "사용량 이력 조회",
+      "description": "선택한 고객의 한전ON 월별 전력 사용량 이력을 반환합니다.",
+      "fields": {
+        "config_entry_id": {
+          "name": "설정 항목",
+          "description": "사용할 한전ON 설정 항목입니다."
+        },
+        "customer_id": {
+          "name": "고객 ID",
+          "description": "한전 고객번호 원문이 아닌 이 통합구성의 액션/문서에서 제공하는 안정 고객 ID를 사용하세요."
+        },
+        "month": {
+          "name": "청구월",
+          "description": "선택 입력 YYYYMM 형식 청구월입니다. 비워 두면 가능한 경우 최신 코디네이터 청구 내역을 사용합니다."
+        }
+      }
+    }
+  },
+  "exceptions": {
+    "invalid_entry": {
+      "message": "선택한 한전ON 설정 항목이 로드되어 있지 않습니다."
+    },
+    "invalid_customer": {
+      "message": "선택한 고객 ID를 이 한전ON 설정 항목에서 사용할 수 없습니다."
+    },
+    "invalid_month": {
+      "message": "미래가 아니며 지원되는 최근 24개월 범위 안의 올바른 YYYYMM 월을 입력하세요."
+    },
+    "service_failed": {
+      "message": "한전ON이 요청한 데이터를 반환하지 못했습니다. 통합구성이 새로 고침된 뒤 다시 시도하세요."
+    }
+  },
   "entity": {
     "sensor": {
       "monthly_usage": {

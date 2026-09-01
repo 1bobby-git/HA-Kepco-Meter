@@ -26,6 +26,7 @@ from .exceptions import (
     KepcoOnUnsupportedAccount,
 )
 from .models import strict_selected_stored_customers
+from .services import async_setup_services
 from .session_store import KepcoOnSessionStore, session_from_payload
 
 _LOGGER = logging.getLogger(__name__)
@@ -43,6 +44,13 @@ class KepcoOnRuntimeData:
 
 
 type KepcoOnConfigEntry = ConfigEntry[KepcoOnRuntimeData]
+
+
+async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
+    """Set up KEPCO ON integration-level services."""
+    del config
+    await async_setup_services(hass)
+    return True
 
 
 async def _close_session(session: ClientSession) -> None:
@@ -175,6 +183,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> 
 __all__ = [
     "KepcoOnConfigEntry",
     "KepcoOnRuntimeData",
+    "async_setup",
     "async_setup_entry",
     "async_unload_entry",
 ]
