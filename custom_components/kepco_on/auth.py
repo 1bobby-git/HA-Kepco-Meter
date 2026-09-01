@@ -24,6 +24,21 @@ from .session_store import export_cookies, restore_cookies
 
 JsonObject = dict[str, object]
 ClockCallback = Callable[[], datetime]
+LOGIN_RESPONSE_FIELDS = (
+    "result",
+    "errorCode",
+    "errorMessage",
+    "token",
+    "refreshToken",
+    "userId",
+    "mbrsNm",
+    "movePage",
+    "serviceMode",
+    "pwdUpdFlag",
+    "frstLoginTF",
+    "pwdUp",
+    "userMngSeqno",
+)
 
 
 class SessionStore(Protocol):
@@ -48,6 +63,29 @@ def _require_str(payload: JsonObject, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise KepcoOnProtocolError(f"KEPCO ON authentication response is missing {field}")
     return value
+
+
+def _safe_value_shape(value: object) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, str):
+        return f"str:{'nonempty' if value else 'empty'}"
+    if isinstance(value, bool):
+        return "bool"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, dict):
+        return "object"
+    return "invalid"
+
+
+def _safe_login_response_shape(payload: JsonObject) -> str:
+    return ", ".join(
+        f"{field}={_safe_value_shape(payload[field]) if field in payload else 'missing'}"
+        for field in LOGIN_RESPONSE_FIELDS
+    )
 
 
 class KepcoOnAuth:
@@ -211,19 +249,24 @@ class KepcoOnAuth:
         )
         if payload.get("result") == "NO":
             raise KepcoOnAuthError("KEPCO ON authentication failed")
-        session = KepcoAccountSession(
-            refresh_token=_require_str(payload, "refreshToken"),
-            token=_require_str(payload, "token"),
-            user_id=_require_str(payload, "userId"),
-            member_name=_require_str(payload, "mbrsNm"),
-            user_mng_seqno=self._optional_str(payload, "userMngSeqno"),
-            cookies=export_cookies(
-                self._cookie_jar,
-                PERSISTED_COOKIE_ALLOWLIST,
-                now=self._clock(),
-            ),
-            updated_at=self._clock(),
-        )
+        try:
+            session = KepcoAccountSession(
+                refresh_token=_require_str(payload, "refreshToken"),
+                token=_require_str(payload, "token"),
+                user_id=_require_str(payload, "userId"),
+                member_name=_require_str(payload, "mbrsNm"),
+                user_mng_seqno=self._optional_str(payload, "userMngSeqno"),
+                cookies=export_cookies(
+                    self._cookie_jar,
+                    PERSISTED_COOKIE_ALLOWLIST,
+                    now=self._clock(),
+                ),
+                updated_at=self._clock(),
+            )
+        except KepcoOnProtocolError as err:
+            raise KepcoOnProtocolError(
+                f"{err}; login response shape: {_safe_login_response_shape(payload)}"
+            ) from err
         await self._save_current_session(session)
         return session
 

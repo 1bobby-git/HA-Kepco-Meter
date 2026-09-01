@@ -204,6 +204,36 @@ async def test_login_unknown_or_missing_token_schema_raises_protocol_error(
 
 
 @pytest.mark.asyncio
+async def test_login_protocol_error_reports_safe_field_shape_without_values() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/cyb/me/login/indi/api",
+        "post",
+        response=json_response(
+            {
+                "result": "YES",
+                "token": "TOKEN_SECRET_CANARY",
+                "userId": "USER_ID_SECRET_CANARY",
+                "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+                "serviceMode": "SERVICE_SECRET_CANARY",
+            }
+        ),
+    )
+    async with auth_context(server, MemorySessionStore()) as auth:
+        with pytest.raises(KepcoOnProtocolError) as raised:
+            await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+
+    rendered = str(raised.value)
+    assert "refreshToken=missing" in rendered
+    assert "token=str:nonempty" in rendered
+    assert "result=str:nonempty" in rendered
+    assert "serviceMode" in rendered
+    assert_no_secret(rendered)
+    assert "SERVICE_SECRET_CANARY" not in rendered
+
+
+@pytest.mark.asyncio
 async def test_login_rejects_empty_one_off_credentials_before_request() -> None:
     server = ResponsesMockServer()
     store = MemorySessionStore()
