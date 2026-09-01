@@ -32,8 +32,16 @@ Use the Linux run to cover tests that require `pytest-homeassistant-custom-compo
 
 ## Fixture Extractor
 
+PowerShell with the known Desktop capture path:
+
 ```powershell
-.\.venv\Scripts\python tools\extract-safe-fixtures.py --check
+.\.venv\Scripts\python tools\extract-safe-fixtures.py --input "$env:USERPROFILE\Desktop\kepco-on-wire.safe.jsonl" --check
+```
+
+Portable form:
+
+```powershell
+.\.venv\Scripts\python tools\extract-safe-fixtures.py --input <path-to-kepco-on-wire.safe.jsonl> --check
 ```
 
 The extractor must operate on safe, minimized fixtures only. Raw KEPCO ON captures stay outside Git.
@@ -93,4 +101,4 @@ git diff --check
 git status --short
 ```
 
-The second command intentionally finds protocol field names; review matches to ensure no raw values are present.
+The protocol-field scan intentionally finds schema field names; review matches to ensure no raw values are present.

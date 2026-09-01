@@ -29,7 +29,7 @@ Use `npm run capture:login-schema` only for protocol maintenance. The tool:
 - Opens installed Chrome through Playwright and waits for the user to complete normal login.
 - Observes only `/cyb/me/login/indi/api`, `/me/login/firstLogin/check`, `/sessionCheck`, and `/ssoCheck`.
 - Writes only `login-schema.safe.json`, which is ignored by Git.
-- Records endpoint, method, safe submission id, JSON key paths/types/string lengths/null flags/credential-pattern booleans, status, content type, token-like field names and lengths, and success/failure code field names.
+- Records endpoint, method, safe submission id, JSON key paths/types/string lengths/null flags/credential-pattern booleans, status, content type, sensitive-field names and lengths, and success/failure code field names.
 - Refuses to write when the serialized output contains the exact username/password canaries or suspicious secret-shaped values.
 - Deletes only the validated temp profile path in `finally`.
 

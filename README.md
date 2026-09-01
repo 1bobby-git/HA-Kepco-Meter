@@ -38,17 +38,42 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 
 기본 활성 센서:
 
-- 월 사용량: `kWh`
-- 검침값: 누적 `kWh`, Energy Dashboard의 `meter_reading` 소스로 사용 가능
-- 청구 금액: `KRW`
-- 전월 사용량
-- 전년 동월 사용량
-- 동 평균 사용량
-- 단지 평균 사용량
+| 키 | 한전ON/파서 출처 | 단위 | 기기/상태 클래스 | 기본값 |
+| --- | --- | --- | --- | --- |
+| `monthly_usage` | 월 사용량 | `kWh` | energy / 없음 | 활성 |
+| `meter_reading` | 현재 누적 검침값 | `kWh` | energy / `total_increasing` | 활성 |
+| `amount_due` | 청구 금액 | `KRW` | monetary / 없음 | 활성 |
+| `previous_month_usage` | 전월 사용량 | `kWh` | energy / 없음 | 활성 |
+| `last_year_same_month_usage` | 전년 동월 사용량 | `kWh` | energy / 없음 | 활성 |
+| `building_average_usage` | 동 평균 사용량 | `kWh` | energy / 없음 | 활성 |
+| `apartment_average_usage` | 단지 평균 사용량 | `kWh` | energy / 없음 | 활성 |
 
-상세 센서는 기본 비활성입니다. 옵션에서 상세 센서를 켜면 이전 검침값, 청구월, 사용기간 시작/종료, 검침일, 기본요금, 전력량요금, 기후환경요금, 연료비조정요금, 할인, 부가세, 전력산업기반기금, 절사/반올림 금액 엔티티가 생성되거나 기존 비활성 엔티티가 활성화됩니다.
+상세 센서는 기본 비활성입니다. 옵션에서 상세 센서를 켜면 새 엔티티는 활성 기본값으로 생성되고, 기존에 통합 기본값 때문에 비활성화된 상세 엔티티는 활성화됩니다.
 
-CO2 센서는 옵션에서 켠 경우에만 생성됩니다. 이 값은 사용량에 사용자가 지정한 `kg/kWh` 계수를 곱한 추정치이며 한전ON에서 내려주는 실측 배출량이 아닙니다.
+| 키 | 한전ON/파서 출처 | 단위 | 기기/상태 클래스 | 기본값 |
+| --- | --- | --- | --- | --- |
+| `previous_meter_reading` | 이전 누적 검침값 | `kWh` | energy / 없음 | 비활성 |
+| `billing_month` | 청구월 | 없음 | 없음 / 없음 | 비활성 |
+| `usage_period_start` | 사용기간 시작일 | 없음 | date / 없음 | 비활성 |
+| `usage_period_end` | 사용기간 종료일 | 없음 | date / 없음 | 비활성 |
+| `meter_reading_day` | 검침일 | 없음 | 없음 / 없음 | 비활성 |
+| `electricity_subtotal` | 전기요금 소계 | `KRW` | monetary / 없음 | 비활성 |
+| `base_charge` | 기본요금 | `KRW` | monetary / 없음 | 비활성 |
+| `energy_charge` | 전력량요금 | `KRW` | monetary / 없음 | 비활성 |
+| `climate_environment_charge` | 기후환경요금 | `KRW` | monetary / 없음 | 비활성 |
+| `fuel_adjustment_charge` | 연료비조정요금 | `KRW` | monetary / 없음 | 비활성 |
+| `child_discount` | 할인 금액 | `KRW` | monetary / 없음 | 비활성 |
+| `vat` | 부가세 | `KRW` | monetary / 없음 | 비활성 |
+| `power_industry_fund` | 전력산업기반기금 | `KRW` | monetary / 없음 | 비활성 |
+| `rounding_amount` | 절사/반올림 금액 | `KRW` | monetary / 없음 | 비활성 |
+
+선택 옵션 센서:
+
+| 키 | 출처 | 단위 | 기기/상태 클래스 | 기본값 |
+| --- | --- | --- | --- | --- |
+| `co2_estimate` | 월 사용량 x 사용자 지정 `kg/kWh` 계수 | `kg` | 없음 / 없음 | 생성 안 함 |
+
+CO2 값은 한전ON에서 내려주는 실측 배출량이 아니라 로컬 추정치입니다.
 
 엔티티 ID는 Home Assistant가 설치 환경의 이름 충돌 상태에 따라 정합니다. 고객별 고유 ID도 원본 고객번호가 아니라 계정/고객 정보를 해시한 안정 키이므로 환경마다 다를 수 있습니다.
 
@@ -141,6 +166,10 @@ Home Assistant에서 통합 항목을 삭제하면 이 통합이 소유한 항�
 ## 릴리스 체크
 
 릴리스 태그는 매니페스트 `version`, Git 태그, GitHub 릴리스 제목을 일치시킨 뒤 생성합니다. HACS 커스텀 저장소 설치, Hassfest, Home Assistant 실제 로드, HAOS 재시작 복구, 라이브 한전ON 로그인/요금 조회는 아직 최종 릴리스 증거로 수행되지 않았습니다.
+
+## 라이선스
+
+[MIT License](LICENSE)를 따릅니다.
 
 ## English Summary
 

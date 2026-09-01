@@ -20,7 +20,20 @@ export const ALLOWED_ENDPOINTS = Object.freeze([
 ]);
 
 const SUCCESS_FAILURE_FIELD_PATTERN = /(?:^|\.)(?:result|errorCode|errorMessage|loginChk|statusCode|rsMsg)$/i;
-const TOKEN_FIELD_PATTERN = /token|jwt|session|sso|authorization|auth/i;
+const SENSITIVE_FIELD_PATTERN = /cookie|token|jwt|session|sso|authorization|auth/i;
+const SAFE_SCHEMA_METADATA_KEYS = new Set([
+  "key",
+  "length",
+  "matchesBase64",
+  "matchesHex",
+  "matchesJwt",
+  "matchesPassword",
+  "matchesUsername",
+  "name",
+  "path",
+  "secret",
+  "type",
+]);
 
 function typeOfJson(value) {
   if (value === null) {
@@ -187,8 +200,8 @@ export function summarizeResponse(response) {
       }
       return copy;
     }),
-    tokenLikeFields: keyPaths
-      .filter((item) => item.type === "string" && TOKEN_FIELD_PATTERN.test(lastPathName(item.path)))
+    secretFields: keyPaths
+      .filter((item) => item.type === "string" && SENSITIVE_FIELD_PATTERN.test(lastPathName(item.path)))
       .map((item) => ({ path: item.path, name: lastPathName(item.path), length: item.length }))
       .sort((left, right) => left.path.localeCompare(right.path)),
     successFailureCodeFields: keyPaths
@@ -250,13 +263,18 @@ function findSuspiciousSerializedValues(value, path = "$", findings = []) {
   }
   if (isPlainObject(value)) {
     for (const [key, child] of Object.entries(value)) {
-      findSuspiciousSerializedValues(child, jsonPathFor(path, key), findings);
+      const childPath = jsonPathFor(path, key);
+      if (SENSITIVE_FIELD_PATTERN.test(key) && !isSafeSchemaMetadataValue(child, key)) {
+        findings.push(childPath);
+        continue;
+      }
+      findSuspiciousSerializedValues(child, childPath, findings);
     }
     return findings;
   }
   if (typeof value === "string") {
     const name = lastPathName(path);
-    if (TOKEN_FIELD_PATTERN.test(name) && value.length > 0 && !/^\$\.|^\/|^[A-Za-z-]+$/.test(value)) {
+    if (SENSITIVE_FIELD_PATTERN.test(name) && value.length > 0 && !/^\$\.|^\/|^[A-Za-z-]+$/.test(value)) {
       findings.push(path);
     }
     if (looksJwt(value)) {
@@ -264,6 +282,31 @@ function findSuspiciousSerializedValues(value, path = "$", findings = []) {
     }
   }
   return findings;
+}
+
+function isSafeSchemaMetadataValue(value, key) {
+  if (!SAFE_SCHEMA_METADATA_KEYS.has(key)) {
+    return false;
+  }
+  if (key === "secret") {
+    return typeof value === "boolean";
+  }
+  if (key === "length") {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0;
+  }
+  if (key === "path") {
+    return typeof value === "string" && value.startsWith("$.");
+  }
+  if (key === "key" || key === "name") {
+    return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
+  }
+  if (key === "type") {
+    return ["array", "boolean", "null", "number", "object", "string", "undefined"].includes(value);
+  }
+  if (key.startsWith("matches")) {
+    return typeof value === "boolean";
+  }
+  return false;
 }
 
 export function safeStringify(value, secrets = {}) {

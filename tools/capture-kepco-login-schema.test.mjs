@@ -113,7 +113,7 @@ test("request summary keeps only endpoint, method, submissionid, and safe body m
   assert.equal(JSON.stringify(summary).includes(USERNAME_CANARY), false);
 });
 
-test("response summary records status, content type, key paths, and token-like metadata only", () => {
+test("response summary records status, content type, key paths, and secret metadata only", () => {
   const summary = summarizeResponse({
     status: 200,
     headers: { "content-type": "application/json; charset=UTF-8" },
@@ -131,7 +131,7 @@ test("response summary records status, content type, key paths, and token-like m
     "$.errorCode",
     "$.result",
   ]);
-  assert.deepEqual(summary.tokenLikeFields, [
+  assert.deepEqual(summary.secretFields, [
     { path: "$.nested.access_token", name: "access_token", length: 32 },
     { path: "$.refreshToken", name: "refreshToken", length: 11 },
   ]);
@@ -183,6 +183,38 @@ test("safeStringify is deterministic and fails closed when canaries are present"
     () => safeStringify({ value: PASSWORD_CANARY }, { username: "u", password: PASSWORD_CANARY }),
     /Refusing to write/,
   );
+});
+
+test("safeStringify rejects direct and nested sensitive property values", () => {
+  const sensitivePayloads = [
+    { cookie: "COOKIE_SECRET_SHOULD_NOT_WRITE" },
+    { token: "abcdefghijklmnopqrstuvwxyz" },
+    { nested: { cookie: "COOKIE_SECRET_SHOULD_NOT_WRITE" } },
+    { list: [{ token: "abcdefghijklmnopqrstuvwxyz" }] },
+    { auth: { value: "AUTH_SECRET_SHOULD_NOT_WRITE" } },
+    { session: { id: "SESSION_SECRET_SHOULD_NOT_WRITE" } },
+  ];
+
+  for (const payload of sensitivePayloads) {
+    assert.throws(() => safeStringify(payload), /Refusing to write/);
+  }
+});
+
+test("safeStringify permits schema metadata for sensitive field names", () => {
+  const serialized = safeStringify({
+    fields: [
+      {
+        path: "$.refreshToken",
+        key: "refreshToken",
+        length: 26,
+        secret: true,
+      },
+    ],
+  });
+
+  assert.match(serialized, /"\$\.refreshToken"/);
+  assert.match(serialized, /"refreshToken"/);
+  assert.match(serialized, /"secret": true/);
 });
 
 test("temp profile cleanup guard allows only the tool mkdtemp prefix under OS temp", () => {
