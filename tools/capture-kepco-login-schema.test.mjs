@@ -9,9 +9,13 @@ import {
   buildSafeCapture,
   flattenJsonPaths,
   isAllowedEndpoint,
+  safeCaptureJson,
   safeStringify,
+  settlePendingSummaries,
+  summarizeSafeRecord,
   summarizeRequest,
   summarizeResponse,
+  trackSafeSummary,
   validateTempProfileForRemoval,
 } from "./capture-kepco-login-schema.mjs";
 
@@ -172,6 +176,141 @@ test("safe capture rejects unallowed endpoints and sorts captured records", () =
   assert.equal(isAllowedEndpoint("https://online.kepco.co.kr/not-allowed"), false);
 });
 
+test("summarizeSafeRecord stores only safe metadata without raw headers or bodies", () => {
+  const record = summarizeSafeRecord(
+    {
+      request: {
+        url: "https://online.kepco.co.kr/cyb/me/login/indi/api",
+        method: "POST",
+        headers: {
+          submissionid: "mf_login_popup_wframe_sbm_submission4",
+          cookie: "RAW_COOKIE_SHOULD_NOT_WRITE",
+        },
+        postDataJSON: {
+          userId: USERNAME_CANARY,
+          pwdVal: PASSWORD_CANARY,
+        },
+      },
+      response: {
+        status: 200,
+        headers: {
+          "content-type": "application/json",
+          "set-cookie": "RAW_RESPONSE_COOKIE_SHOULD_NOT_WRITE",
+        },
+        json: {
+          refreshToken: "abc.def.ghi",
+          mbrsNm: USERNAME_CANARY,
+        },
+      },
+    },
+    { username: USERNAME_CANARY, password: PASSWORD_CANARY },
+  );
+
+  assert.equal(record.endpoint, "/cyb/me/login/indi/api");
+  assert.equal(record.method, "POST");
+  assert.equal("headers" in record, false);
+  assert.equal("body" in record, false);
+  assert.equal("postData" in record, false);
+  assert.equal("postDataJSON" in record, false);
+  assert.equal("responseJson" in record, false);
+  assert.equal(JSON.stringify(record).includes(USERNAME_CANARY), false);
+  assert.equal(JSON.stringify(record).includes(PASSWORD_CANARY), false);
+  assert.equal(JSON.stringify(record).includes("RAW_COOKIE_SHOULD_NOT_WRITE"), false);
+});
+
+test("settlePendingSummaries waits for delayed records and reports safe failures", async () => {
+  const pending = new Set();
+  const records = [];
+  const failures = [];
+
+  trackSafeSummary(
+    pending,
+    records,
+    failures,
+    new Promise((resolve) =>
+      setTimeout(
+        () =>
+          resolve({
+            sequence: 2,
+            endpoint: "/ssoCheck",
+            method: "POST",
+            request: { bodyPaths: [] },
+            response: { status: 200 },
+          }),
+        20,
+      ),
+    ),
+    2,
+  );
+  trackSafeSummary(
+    pending,
+    records,
+    failures,
+    Promise.reject(new Error("RAW_TOKEN_SHOULD_NOT_WRITE")),
+    1,
+  );
+
+  const settled = await settlePendingSummaries(pending, records, failures);
+
+  assert.equal(settled.total, 2);
+  assert.equal(settled.failures.length, 1);
+  assert.deepEqual(records.map((record) => record.endpoint), ["/ssoCheck"]);
+  assert.equal(JSON.stringify(settled).includes("RAW_TOKEN_SHOULD_NOT_WRITE"), false);
+});
+
+test("safe capture JSON and hash are stable across different completion orders", () => {
+  const first = safeCaptureJson([
+    {
+      sequence: 2,
+      endpoint: "/ssoCheck",
+      method: "POST",
+      request: { endpoint: "/ssoCheck", method: "POST", bodyPaths: [] },
+      response: { status: 200, contentType: "application/json", keyPaths: [] },
+    },
+    {
+      sequence: 1,
+      endpoint: "/ssoCheck",
+      method: "POST",
+      request: {
+        endpoint: "/ssoCheck",
+        method: "POST",
+        bodyPaths: [{ path: "$.a", type: "number" }],
+      },
+      response: { status: 200, contentType: "application/json", keyPaths: [] },
+    },
+  ]);
+  const second = safeCaptureJson([
+    {
+      sequence: 99,
+      endpoint: "/ssoCheck",
+      method: "POST",
+      request: {
+        endpoint: "/ssoCheck",
+        method: "POST",
+        bodyPaths: [{ path: "$.a", type: "number" }],
+      },
+      response: { status: 200, contentType: "application/json", keyPaths: [] },
+    },
+    {
+      sequence: 7,
+      endpoint: "/ssoCheck",
+      method: "POST",
+      request: { endpoint: "/ssoCheck", method: "POST", bodyPaths: [] },
+      response: { status: 200, contentType: "application/json", keyPaths: [] },
+    },
+  ]);
+
+  assert.equal(first.json, second.json);
+  assert.equal(first.hash, second.hash);
+  assert.equal(first.json.includes("generatedAt"), false);
+  const parsed = JSON.parse(first.json);
+  assert.equal(parsed.records.length, 2);
+  assert.deepEqual(
+    parsed.records.map((record) => record.request.bodyPaths.length),
+    [0, 1],
+  );
+});
+
 test("safeStringify is deterministic and fails closed when canaries are present", () => {
   const safe = safeStringify({ b: 2, a: { d: 4, c: 3 } }, {
     username: USERNAME_CANARY,
@@ -189,6 +328,18 @@ test("safeStringify rejects direct and nested sensitive property values", () => 
   const sensitivePayloads = [
     { cookie: "COOKIE_SECRET_SHOULD_NOT_WRITE" },
     { token: "abcdefghijklmnopqrstuvwxyz" },
+    { pwdVal: "PASSWORD_SECRET_SHOULD_NOT_WRITE" },
+    { userId: "USER_ID_SECRET_SHOULD_NOT_WRITE" },
+    { mbrsNm: "MEMBER_NAME_SECRET_SHOULD_NOT_WRITE" },
+    { userMngSeqno: "USER_SEQ_SECRET_SHOULD_NOT_WRITE" },
+    { custNo: "CUSTOMER_SECRET_SHOULD_NOT_WRITE" },
+    { housCntrNo: "HOUSE_CONTRACT_SECRET_SHOULD_NOT_WRITE" },
+    { CUST_NO: "CUSTOMER_SECRET_SHOULD_NOT_WRITE" },
+    { SI_CUST_NO: "HOUSE_CONTRACT_SECRET_SHOULD_NOT_WRITE" },
+    { NAME: "NAME_SECRET_SHOULD_NOT_WRITE" },
+    { ADDR: "ADDRESS_SECRET_SHOULD_NOT_WRITE" },
+    { USER_MTEL: "PHONE_SECRET_SHOULD_NOT_WRITE" },
+    { USER_EMAIL_ADDR: "EMAIL_SECRET_SHOULD_NOT_WRITE" },
     { nested: { cookie: "COOKIE_SECRET_SHOULD_NOT_WRITE" } },
     { list: [{ token: "abcdefghijklmnopqrstuvwxyz" }] },
     { auth: { value: "AUTH_SECRET_SHOULD_NOT_WRITE" } },
@@ -206,6 +357,7 @@ test("safeStringify permits schema metadata for sensitive field names", () => {
       {
         path: "$.refreshToken",
         key: "refreshToken",
+        name: "mbrsNm",
         length: 26,
         secret: true,
       },
@@ -214,6 +366,7 @@ test("safeStringify permits schema metadata for sensitive field names", () => {
 
   assert.match(serialized, /"\$\.refreshToken"/);
   assert.match(serialized, /"refreshToken"/);
+  assert.match(serialized, /"mbrsNm"/);
   assert.match(serialized, /"secret": true/);
 });
 

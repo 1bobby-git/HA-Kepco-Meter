@@ -21,6 +21,19 @@ export const ALLOWED_ENDPOINTS = Object.freeze([
 
 const SUCCESS_FAILURE_FIELD_PATTERN = /(?:^|\.)(?:result|errorCode|errorMessage|loginChk|statusCode|rsMsg)$/i;
 const SENSITIVE_FIELD_PATTERN = /cookie|token|jwt|session|sso|authorization|auth/i;
+const SENSITIVE_EXACT_KEYS = new Set([
+  "addr",
+  "cust_no",
+  "custno",
+  "houscntrno",
+  "mbrsnm",
+  "pwdval",
+  "si_cust_no",
+  "user_email_addr",
+  "user_mtel",
+  "userid",
+  "usermngseqno",
+]);
 const SAFE_SCHEMA_METADATA_KEYS = new Set([
   "key",
   "length",
@@ -152,6 +165,14 @@ function headerValue(headers, name) {
   return undefined;
 }
 
+function safeHeaders(headers, names) {
+  return Object.fromEntries(
+    names
+      .map((name) => [name, headerValue(headers, name)])
+      .filter(([, value]) => value !== undefined),
+  );
+}
+
 function safeSubmissionId(value) {
   if (typeof value !== "string" || value === "") {
     return undefined;
@@ -160,6 +181,17 @@ function safeSubmissionId(value) {
     return "[unsafe-format]";
   }
   return value;
+}
+
+function isSensitivePropertyKey(key) {
+  const normalized = key.replaceAll("-", "_").toLowerCase();
+  const compact = normalized.replaceAll("_", "");
+  return (
+    key === "NAME" ||
+    SENSITIVE_FIELD_PATTERN.test(key) ||
+    SENSITIVE_EXACT_KEYS.has(normalized) ||
+    SENSITIVE_EXACT_KEYS.has(compact)
+  );
 }
 
 export function summarizeRequest(request, secrets = {}) {
@@ -211,34 +243,77 @@ export function summarizeResponse(response) {
   };
 }
 
+export function summarizeSafeRecord(record, secrets = {}) {
+  const request = summarizeRequest(record.request, secrets);
+  if (!request.allowed) {
+    return null;
+  }
+  const response = summarizeResponse(record.response ?? {});
+  return {
+    sequence: record.sequence,
+    endpoint: request.endpoint,
+    method: request.method,
+    submissionid: request.submissionid,
+    request,
+    response,
+  };
+}
+
+function safeRecordSortKey(record) {
+  const structural = stableCopy({ ...record, sequence: undefined });
+  delete structural.sequence;
+  return JSON.stringify(structural);
+}
+
+function publicSafeRecord(record) {
+  const copy = stableCopy(record);
+  delete copy.sequence;
+  return copy;
+}
+
 export function buildSafeCapture(records, secrets = {}) {
   const safeRecords = [];
   for (const record of records) {
-    const request = summarizeRequest(record.request, secrets);
-    if (!request.allowed) {
+    const safeRecord = record.request?.url && record.response
+      ? summarizeSafeRecord(record, secrets)
+      : record;
+    if (safeRecord === null || !safeRecord?.endpoint) {
       continue;
     }
-    const response = summarizeResponse(record.response ?? {});
-    safeRecords.push({
-      endpoint: request.endpoint,
-      method: request.method,
-      submissionid: request.submissionid,
-      request,
-      response,
-    });
+    safeRecords.push(safeRecord);
   }
   safeRecords.sort((left, right) => {
     const endpointOrder = left.endpoint.localeCompare(right.endpoint);
     if (endpointOrder !== 0) {
       return endpointOrder;
     }
-    return left.method.localeCompare(right.method);
+    const methodOrder = left.method.localeCompare(right.method);
+    if (methodOrder !== 0) {
+      return methodOrder;
+    }
+    return safeRecordSortKey(left).localeCompare(safeRecordSortKey(right));
   });
   return {
-    generatedAt: new Date(0).toISOString(),
     source: "kepco-login-schema-capture",
     allowedEndpoints: [...ALLOWED_ENDPOINTS],
-    records: safeRecords,
+    records: safeRecords.map(publicSafeRecord),
+  };
+}
+
+export function safeCaptureJson(records, secrets = {}, failures = []) {
+  const capture = buildSafeCapture(records, secrets);
+  const safeFailures = failures.map((failure) => ({
+    sequence: failure.sequence,
+    message: "summary failed",
+  }));
+  const payload = {
+    ...capture,
+    ...(safeFailures.length > 0 ? { summaryFailures: safeFailures } : {}),
+  };
+  const json = safeStringify(payload, secrets);
+  return {
+    json,
+    hash: createHash("sha256").update(json).digest("hex"),
   };
 }
 
@@ -264,7 +339,7 @@ function findSuspiciousSerializedValues(value, path = "$", findings = []) {
   if (isPlainObject(value)) {
     for (const [key, child] of Object.entries(value)) {
       const childPath = jsonPathFor(path, key);
-      if (SENSITIVE_FIELD_PATTERN.test(key) && !isSafeSchemaMetadataValue(child, key)) {
+      if (isSensitivePropertyKey(key) && !isSafeSchemaMetadataValue(child, key)) {
         findings.push(childPath);
         continue;
       }
@@ -274,7 +349,7 @@ function findSuspiciousSerializedValues(value, path = "$", findings = []) {
   }
   if (typeof value === "string") {
     const name = lastPathName(path);
-    if (SENSITIVE_FIELD_PATTERN.test(name) && value.length > 0 && !/^\$\.|^\/|^[A-Za-z-]+$/.test(value)) {
+    if (isSensitivePropertyKey(name) && value.length > 0 && !/^\$\.|^\/|^[A-Za-z-]+$/.test(value)) {
       findings.push(path);
     }
     if (looksJwt(value)) {
@@ -403,7 +478,7 @@ function requestToPlain(request) {
   return {
     url: request.url(),
     method: request.method(),
-    headers: request.headers(),
+    headers: safeHeaders(request.headers(), ["submissionid"]),
     postDataJSON,
   };
 }
@@ -417,8 +492,51 @@ async function responseToPlain(response) {
   }
   return {
     status: response.status(),
-    headers: await response.allHeaders(),
+    headers: safeHeaders(await response.allHeaders(), ["content-type"]),
     json,
+  };
+}
+
+async function summarizePlaywrightResponse(response, secrets, sequence) {
+  const request = response.request();
+  if (!isAllowedEndpoint(request.url())) {
+    return null;
+  }
+  return summarizeSafeRecord(
+    {
+      sequence,
+      request: requestToPlain(request),
+      response: await responseToPlain(response),
+    },
+    secrets,
+  );
+}
+
+export function trackSafeSummary(pending, records, failures, promise, sequence) {
+  const tracked = promise
+    .then((record) => {
+      if (record) {
+        records.push(record);
+      }
+    })
+    .catch(() => {
+      failures.push({ sequence, message: "summary failed" });
+    })
+    .finally(() => pending.delete(tracked));
+  pending.add(tracked);
+  return tracked;
+}
+
+export async function settlePendingSummaries(pending, records, failures) {
+  const promises = [...pending];
+  const settled = await Promise.allSettled(promises);
+  return {
+    total: settled.length,
+    records: records.length,
+    failures: failures.map((failure) => ({
+      sequence: failure.sequence,
+      message: "summary failed",
+    })),
   };
 }
 
@@ -427,6 +545,10 @@ async function runCapture() {
   const secrets = await readCredentials();
   const profilePath = await mkdtemp(join(tmpdir(), TEMP_PROFILE_PREFIX));
   const records = [];
+  const pending = new Set();
+  const failures = [];
+  let accepting = true;
+  let nextSequence = 0;
   let context;
   try {
     context = await chromium.launchPersistentContext(profilePath, {
@@ -434,30 +556,39 @@ async function runCapture() {
       headless: false,
     });
     const page = context.pages()[0] ?? (await context.newPage());
-    page.on("response", async (response) => {
+    page.on("response", (response) => {
       const request = response.request();
-      if (!isAllowedEndpoint(request.url())) {
+      if (!accepting || !isAllowedEndpoint(request.url())) {
         return;
       }
-      try {
-        const plainRecord = {
-          request: requestToPlain(request),
-          response: await responseToPlain(response),
-        };
-        records.push(plainRecord);
-        const endpoint = endpointFromUrl(request.url());
-        output.write(
-          `Captured ${endpoint} status=${plainRecord.response.status} count=${records.length}\n`,
-        );
-      } catch (error) {
-        output.write(`Skipped response summary after capture error: ${error.message}\n`);
-      }
+      nextSequence += 1;
+      const sequence = nextSequence;
+      trackSafeSummary(
+        pending,
+        records,
+        failures,
+        summarizePlaywrightResponse(response, secrets, sequence).then((record) => {
+          if (record) {
+            output.write(
+              `Captured ${record.endpoint} status=${record.response.status} count=${records.length + 1}\n`,
+            );
+          }
+          return record;
+        }),
+        sequence,
+      );
     });
 
     await page.goto(START_URL, { waitUntil: "domcontentloaded" });
     output.write("Complete the normal KEPCO ON login in Chrome. Do not bypass CAPTCHA, MFA, OACX, or other challenges.\n");
     await promptVisible("Press Enter here after login/session checks finish: ");
+    accepting = false;
+    const settled = await settlePendingSummaries(pending, records, failures);
+    if (settled.failures.length > 0) {
+      output.write(`Summary failures=${settled.failures.length}; failed records omitted safely\n`);
+    }
   } finally {
+    accepting = false;
     if (context) {
       await context.close();
     }
@@ -465,20 +596,11 @@ async function runCapture() {
     await rm(safeProfile, { recursive: true, force: true });
   }
 
-  const safeCapture = buildSafeCapture(records, secrets);
-  const serialized = safeStringify(
-    {
-      ...safeCapture,
-      generatedAt: new Date().toISOString(),
-      captureHash: createHash("sha256")
-        .update(JSON.stringify(safeCapture.records))
-        .digest("hex"),
-    },
-    secrets,
-  );
+  const safeCapture = safeCaptureJson(records, secrets, failures);
+  const serialized = safeCapture.json;
   await writeFile(OUTPUT_FILE, serialized, { encoding: "utf8", flag: "wx" });
   output.write(
-    `Wrote ${OUTPUT_FILE}; endpoints=${safeCapture.records.length}; security-scan=passed\n`,
+    `Wrote ${OUTPUT_FILE}; endpoints=${records.length}; hash=${safeCapture.hash}; security-scan=passed\n`,
   );
 }
 
