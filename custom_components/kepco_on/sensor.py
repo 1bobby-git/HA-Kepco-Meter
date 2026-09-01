@@ -373,12 +373,12 @@ async def _async_remove_stale_registry_entries(
         customer_key = _customer_key_from_unique_id(registry_entry.unique_id)
         if customer_key is None:
             continue
+        if customer_key not in selected_keys:
+            entity_registry.async_remove(registry_entry.entity_id)
+            continue
         if _is_description_unique_id(registry_entry.unique_id, CO2_SENSOR_DESCRIPTION.key):
             if not co2_enabled:
                 entity_registry.async_remove(registry_entry.entity_id)
-            continue
-        if customer_key not in selected_keys:
-            entity_registry.async_remove(registry_entry.entity_id)
             continue
         if (
             detailed_enabled

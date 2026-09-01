@@ -650,6 +650,58 @@ async def test_setup_co2_toggle_on_keeps_registry_and_creates_entity(
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
+    ("co2_enabled", "expected_removed"),
+    [
+        (False, ["sensor.selected_co2", "sensor.stale_co2"]),
+        (True, ["sensor.stale_co2"]),
+    ],
+)
+async def test_setup_co2_cleanup_removes_stale_customer_before_option_handling(
+    monkeypatch: pytest.MonkeyPatch,
+    co2_enabled: bool,
+    expected_removed: list[str],
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    sensor_any = cast("Any", sensor_module)
+    entity_registry = FakeEntityRegistry(
+        [
+            entity_entry("sensor.selected_co2", "cust-a_co2_estimate"),
+            entity_entry("sensor.stale_co2", "stale_co2_estimate"),
+            entity_entry("sensor.selected_monthly", "cust-a_monthly_usage"),
+            entity_entry("sensor.stale_monthly", "stale_monthly_usage"),
+            entity_entry(
+                "sensor.other_entry_stale_co2",
+                "stale_co2_estimate",
+                config_entry_id="entry-2",
+            ),
+            entity_entry(
+                "sensor.other_platform_stale_co2",
+                "stale_co2_estimate",
+                platform="other",
+            ),
+        ]
+    )
+    device_registry = FakeDeviceRegistry([])
+    monkeypatch.setattr(sensor_any.er, "async_get", lambda hass: entity_registry)
+    monkeypatch.setattr(
+        sensor_any.er, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+    monkeypatch.setattr(sensor_any.dr, "async_get", lambda hass: device_registry)
+    monkeypatch.setattr(
+        sensor_any.dr, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+
+    await setup_entities(
+        options={OPT_ENABLE_CO2_ESTIMATE: co2_enabled},
+        use_real_registry_cleanup=True,
+    )
+
+    assert entity_registry.removed == [*expected_removed, "sensor.stale_monthly"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
     ("identifiers", "expected"),
     [
         ({(DOMAIN, "cust-a")}, False),
