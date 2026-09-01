@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import KepcoOnClient
 from .auth import KepcoOnAuth
@@ -140,7 +141,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
             reauth_password=str(entry.data[CONF_PASSWORD]) if _has_saved_password(entry) else None,
         )
         await _ensure_authenticated(auth, entry)
-        client = KepcoOnClient(auth)
+        client = KepcoOnClient(auth, clock=dt_util.now)
         await client.async_get_account_type()
         customers = strict_selected_stored_customers(entry.data)
         coordinator = KepcoOnDataUpdateCoordinator(hass, entry, client, customers)

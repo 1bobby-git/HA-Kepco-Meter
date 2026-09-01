@@ -10,6 +10,7 @@ from email.utils import parsedate_to_datetime
 from typing import Protocol, cast
 
 from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout
+from homeassistant.util import dt as dt_util
 
 from .const import (
     BASE_URL,
@@ -229,7 +230,7 @@ class KepcoOnClient:
         self,
         auth: KepcoAuthProvider,
         *,
-        clock: ClockCallback = _utc_now,
+        clock: ClockCallback = dt_util.now,
     ) -> None:
         self._auth = auth
         self._clock = clock
@@ -299,7 +300,7 @@ class KepcoOnClient:
         parsed = parse_year_month(month, "month")
         if parsed is None:
             return None
-        now = self._clock().astimezone(UTC)
+        now = self._clock()
         current_month = f"{now.year}{now.month:02d}"
         if parsed > current_month:
             raise KepcoOnProtocolError("month must not be in the future")

@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import traceback
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -277,7 +278,7 @@ async def test_monthly_bill_schema_rejects_missing_or_invalid_month() -> None:
     with pytest.raises(vol.Invalid):
         registered.schema({"config_entry_id": entry.entry_id, "customer_id": selected.stable_key})
 
-    for month in ("2026-08", FULLWIDTH_MONTH, "202613", "202610", "202408"):
+    for month in ("", "   ", "2026-08", FULLWIDTH_MONTH, "202613", "202610", "202408"):
         with pytest.raises(ServiceValidationError) as raised:
             await call_action(
                 registered,
@@ -294,19 +295,46 @@ async def test_monthly_bill_schema_rejects_missing_or_invalid_month() -> None:
 
 
 @pytest.mark.asyncio
-async def test_usage_history_schema_accepts_null_month_and_rejects_invalid_months() -> None:
+async def test_usage_history_normalizes_blank_month_to_latest_bill() -> None:
+    selected = customer()
+    latest = bill(
+        "202608",
+        history=(KepcoUsageHistoryPoint("202607", 120), KepcoUsageHistoryPoint("202608", 130)),
+    )
+    entry = FakeConfigEntry(
+        runtime_data=runtime((selected,), FakeClient([]), latest_bill=latest),
+    )
+    hass = FakeHass({entry.entry_id: entry})
+    await setup_services(hass)
+    registered = hass.services.registered[(DOMAIN, "get_usage_history")]
+
+    for raw_month in (None, "", "   "):
+        response = await call_action(
+            registered,
+            hass,
+            "get_usage_history",
+            {
+                "config_entry_id": entry.entry_id,
+                "customer_id": selected.stable_key,
+                "month": raw_month,
+            },
+        )
+        assert response == {
+            "history": [
+                {"month": "202607", "usage_kwh": 120},
+                {"month": "202608", "usage_kwh": 130},
+            ]
+        }
+
+
+@pytest.mark.asyncio
+async def test_usage_history_schema_rejects_invalid_months() -> None:
     selected = customer()
     entry = FakeConfigEntry(runtime_data=runtime((selected,), FakeClient([])))
     hass = FakeHass({entry.entry_id: entry})
     await setup_services(hass)
     registered = hass.services.registered[(DOMAIN, "get_usage_history")]
 
-    assert (
-        registered.schema(
-            {"config_entry_id": entry.entry_id, "customer_id": selected.stable_key, "month": None}
-        )["month"]
-        is None
-    )
     for value in ("2026-08", FULLWIDTH_MONTH, "202600", "202610", "202408"):
         with pytest.raises(ServiceValidationError) as raised:
             await call_action(
@@ -321,6 +349,34 @@ async def test_usage_history_schema_accepts_null_month_and_rejects_invalid_month
             )
         assert raised.value.translation_domain == DOMAIN
         assert raised.value.translation_key == "invalid_month"
+
+
+@pytest.mark.asyncio
+async def test_service_month_window_uses_home_assistant_local_month(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on.services as services
+
+    monkeypatch.setattr(
+        services,
+        "_now",
+        lambda: datetime(2026, 9, 1, 0, 30, tzinfo=timezone(timedelta(hours=9))),
+    )
+    selected = customer("selected-key")
+    client = FakeClient([bill("202609")])
+    entry = FakeConfigEntry(runtime_data=runtime((selected,), client))
+    hass = FakeHass({entry.entry_id: entry})
+    await setup_services(hass)
+
+    response = await call_action(
+        hass.services.registered[(DOMAIN, "get_monthly_bill")],
+        hass,
+        "get_monthly_bill",
+        {"config_entry_id": entry.entry_id, "customer_id": selected.stable_key, "month": "202609"},
+    )
+
+    assert client.calls == [(selected, "202609")]
+    assert response["billing_month"] == "202609"
 
 
 @pytest.mark.asyncio
@@ -530,6 +586,46 @@ async def test_get_usage_history_fetches_when_month_supplied_or_latest_missing()
 
 
 @pytest.mark.asyncio
+async def test_concurrent_service_calls_return_independent_safe_responses() -> None:
+    customer_a = customer("key-a")
+    customer_b = customer("key-b")
+    client_a = FakeClient([bill("202608", usage=111)])
+    client_b = FakeClient([bill("202608", usage=222)])
+    entry_a = FakeConfigEntry(entry_id="entry-a", runtime_data=runtime((customer_a,), client_a))
+    entry_b = FakeConfigEntry(entry_id="entry-b", runtime_data=runtime((customer_b,), client_b))
+    hass = FakeHass({entry_a.entry_id: entry_a, entry_b.entry_id: entry_b})
+    await setup_services(hass)
+    registered = hass.services.registered[(DOMAIN, "get_monthly_bill")]
+
+    response_a, response_b = await asyncio.gather(
+        call_action(
+            registered,
+            hass,
+            "get_monthly_bill",
+            {
+                "config_entry_id": entry_a.entry_id,
+                "customer_id": customer_a.stable_key,
+                "month": "202608",
+            },
+        ),
+        call_action(
+            registered,
+            hass,
+            "get_monthly_bill",
+            {
+                "config_entry_id": entry_b.entry_id,
+                "customer_id": customer_b.stable_key,
+                "month": "202608",
+            },
+        ),
+    )
+
+    assert response_a["usage_kwh"] == 111
+    assert response_b["usage_kwh"] == 222
+    assert client_a.calls == [(customer_a, "202608")]
+    assert client_b.calls == [(customer_b, "202608")]
+
+
 @pytest.mark.parametrize(
     ("service", "payload", "client_results"),
     [

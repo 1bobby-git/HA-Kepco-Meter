@@ -9,7 +9,7 @@ import socket
 import ssl
 import traceback
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from email.utils import format_datetime
 from pathlib import Path
 from typing import Any, Self, cast
@@ -700,6 +700,40 @@ async def test_client_rejects_bad_or_future_month_before_request() -> None:
             await client.async_get_bill(customer, month)
 
     assert auth.requests == 0
+
+
+@pytest.mark.asyncio
+async def test_client_accepts_current_home_assistant_local_month_at_utc_boundary() -> None:
+    requests: list[dict[str, object]] = []
+
+    class Auth:
+        async def async_protected_request(
+            self, path: str, payload: dict[str, object] | None, *, submission_id: str | None = None
+        ) -> dict[str, object]:
+            del path, submission_id
+            assert payload is not None
+            requests.append(payload)
+            return {"rsMsg": {"statusCode": "S"}, "DO_ERR_CODE": "HXI001", "DO_BILL_YM": "202609"}
+
+        def account_uid_hash(self) -> str:
+            return "ACCOUNT_HASH"
+
+    customer = KepcoCustomer("key", "apt", "101", "1001", "method", True, "CUST", "HOUSE")
+    client = KepcoOnClient(
+        cast("Any", Auth()),
+        clock=lambda: datetime(2026, 9, 1, 0, 30, tzinfo=timezone(timedelta(hours=9))),
+    )
+
+    bill = await client.async_get_bill(customer, "202609")
+
+    assert bill.bill_month == "202609"
+    assert requests[0]["dma_search"] == {
+        "custNo": "CUST",
+        "housCntrNo": "HOUSE",
+        "yymm": "202609",
+        "yyyymm": "202609",
+        "searchType": "DETAIL",
+    }
 
 
 @pytest.mark.asyncio

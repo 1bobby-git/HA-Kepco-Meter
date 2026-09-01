@@ -44,6 +44,7 @@ from homeassistant.config_entries import ConfigEntryState, OptionsFlowManager
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.update_coordinator import UpdateFailed
+from homeassistant.util import dt as dt_util
 
 PASSWORD_SECRET = "PASSWORD_SECRET_CANARY"
 TOKEN_SECRET = "TOKEN_SECRET_CANARY"
@@ -147,8 +148,9 @@ class FakeClient:
     customer_results: ClassVar[list[tuple[KepcoCustomer, ...] | Exception]] = []
     bill_results: ClassVar[list[KepcoBill | Exception]] = []
 
-    def __init__(self, auth: FakeAuth) -> None:
+    def __init__(self, auth: FakeAuth, *, clock: Callable[[], datetime] | None = None) -> None:
         self.auth = auth
+        self.clock = clock
         self.bill_calls: list[KepcoCustomer] = []
         FakeClient.instances.append(self)
 
@@ -415,6 +417,19 @@ async def test_setup_consumes_handoff_saves_store_and_scrubs_entry_data(
     assert entry.runtime_data.session_store is FakeStore.instances[0]
     assert entry.unload_callbacks == []
     assert entry.update_listeners == []
+
+
+@pytest.mark.asyncio
+async def test_setup_constructs_runtime_client_with_home_assistant_local_clock() -> None:
+    import custom_components.kepco_on as init_module
+
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    FakeAuth.login_results = [account_session()]
+
+    assert await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+
+    assert FakeClient.instances[0].clock is dt_util.now
 
 
 @pytest.mark.asyncio

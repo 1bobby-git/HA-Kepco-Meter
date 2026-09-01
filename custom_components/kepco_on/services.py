@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import fields
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import Any, cast
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, OPT_HISTORY_MONTHS
 from .exceptions import KepcoOnError
@@ -27,8 +28,8 @@ _SERVICE_ERROR_KEYS = frozenset({"invalid_entry", "invalid_customer", "invalid_m
 
 
 def _now() -> datetime:
-    """Return the current UTC time."""
-    return datetime.now(UTC)
+    """Return the current Home Assistant local time."""
+    return dt_util.now()
 
 
 def _response_error(translation_key: str) -> HomeAssistantError:
@@ -50,6 +51,8 @@ def _validate_month(month: object, *, required: bool) -> str | None:
     """Validate a YYYYMM service month against the supported rolling window."""
     if month is None and not required:
         return None
+    if isinstance(month, str) and not month.strip() and not required:
+        return None
     if not isinstance(month, str) or len(month) != 6 or not month.isascii() or not month.isdigit():
         raise _response_error("invalid_month")
 
@@ -58,7 +61,7 @@ def _validate_month(month: object, *, required: bool) -> str | None:
     if month_number < 1 or month_number > 12:
         raise _response_error("invalid_month")
 
-    now = _now().astimezone(UTC)
+    now = _now()
     month_index = year * 12 + month_number
     current_index = now.year * 12 + now.month
     earliest_index = current_index - 23
