@@ -160,11 +160,23 @@ async def test_transport_prepares_login_session_with_fixed_safe_get() -> None:
 
 
 @pytest.mark.asyncio
+async def test_transport_accepts_empty_login_bootstrap_without_content_type() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/MYM001D00",
+        "get",
+        response=Response(body=b"", status=200, headers={}),
+    )
+
+    await with_transport(lambda transport: transport.async_prepare_login_session(), server)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("response", "error_type"),
     [
         (Response(text="error", status=500, content_type="text/html"), KepcoOnConnectionError),
-        (Response(text="{}", content_type="application/json"), KepcoOnProtocolError),
     ],
 )
 async def test_transport_rejects_invalid_login_bootstrap_response(

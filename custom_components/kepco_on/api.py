@@ -141,8 +141,6 @@ class KepcoOnTransport:
                     raise _safe_protocol_error("login bootstrap host changed")
                 if response.status != 200:
                     raise KepcoOnConnectionError("Could not initialize KEPCO ON login session")
-                if not response.headers.get("Content-Type", "").lower().startswith("text/html"):
-                    raise _safe_protocol_error("login bootstrap content type changed")
                 body = await response.content.read(MAX_RESPONSE_BYTES + 1)
                 if len(body) > MAX_RESPONSE_BYTES:
                     raise _safe_protocol_error("login bootstrap response was too large")
