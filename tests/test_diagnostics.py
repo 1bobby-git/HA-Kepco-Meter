@@ -30,6 +30,8 @@ PHONE_SECRET = "PHONE_SECRET_CANARY"
 EMAIL_SECRET = "EMAIL_SECRET_CANARY"
 RAW_BODY_SECRET = "RAW_BODY_SECRET_CANARY"
 HISTORY_SECRET = "HISTORY_SECRET_CANARY"
+JWT_SECRET = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret.payload"
+LONG_CUSTOMER_ID_SECRET = "12345678901234567890"
 
 
 class FakeHass:
@@ -108,10 +110,22 @@ async def test_diagnostics_returns_whitelisted_summary_without_private_canaries(
         data=KepcoCoordinatorData(
             customers=(customer(),),
             bills_by_customer_key={"selected-key": bill},
-            errors_by_customer_key={
-                "selected-key": "protocol_error",
-                "other-key": f"api_error:{TOKEN_SECRET}",
-            },
+            errors_by_customer_key=cast(
+                "Any",
+                {
+                    "selected-key": "protocol_error",
+                    "other-key": f"api_error:{TOKEN_SECRET}",
+                    "jwt-key": JWT_SECRET,
+                    "email-key": EMAIL_SECRET,
+                    "phone-key": PHONE_SECRET,
+                    "long-id-key": LONG_CUSTOMER_ID_SECRET,
+                    "nested-key": {
+                        "token": TOKEN_SECRET,
+                        "error": ["protocol_error", JWT_SECRET, EMAIL_SECRET],
+                    },
+                    "none-key": None,
+                },
+            ),
             last_success=datetime(2026, 9, 1, 1, 2, 3, tzinfo=UTC),
         ),
     )
@@ -147,7 +161,7 @@ async def test_diagnostics_returns_whitelisted_summary_without_private_canaries(
         "availability": {
             "customers": 1,
             "bills": 1,
-            "bill_errors": 2,
+            "bill_errors": 8,
         },
         "parsed_fields": {
             "bill": [
@@ -181,8 +195,8 @@ async def test_diagnostics_returns_whitelisted_summary_without_private_canaries(
             "history": ["amount_krw", "month", "usage_kwh"],
         },
         "error_categories": {
-            "api_error": 1,
             "protocol_error": 1,
+            "unknown_error": 7,
         },
     }
     for secret in (
@@ -198,6 +212,8 @@ async def test_diagnostics_returns_whitelisted_summary_without_private_canaries(
         EMAIL_SECRET,
         RAW_BODY_SECRET,
         HISTORY_SECRET,
+        JWT_SECRET,
+        LONG_CUSTOMER_ID_SECRET,
         "TITLE_SECRET_CANARY",
         "USERNAME_SECRET_CANARY",
         "APT_SECRET_CANARY",

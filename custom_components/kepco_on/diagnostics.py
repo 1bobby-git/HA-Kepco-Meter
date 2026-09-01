@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 from collections.abc import Mapping
 from dataclasses import fields, is_dataclass
@@ -120,6 +121,57 @@ SAFE_CHARGE_FIELDS = (
     "vat_krw",
 )
 SAFE_HISTORY_FIELDS = ("amount_krw", "month", "usage_kwh")
+SAFE_ERROR_CATEGORIES = frozenset(
+    {
+        "api_error",
+        "no_customers",
+        "protocol_error",
+        "unknown_error",
+    }
+)
+SUMMARY_SAFE_KEYS = frozenset(
+    {
+        "account_type",
+        "availability",
+        "bill",
+        "bill_errors",
+        "bills",
+        "charge",
+        "config_entry",
+        "customers",
+        "error_categories",
+        "history",
+        "home_assistant_version",
+        "integration",
+        "last_success",
+        "last_update_success",
+        "loaded",
+        "parsed_fields",
+        "polling_interval_hours",
+        "runtime",
+        "selected_customer_count",
+        "version",
+    }
+)
+EMAIL_RE = re.compile(r"[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}", re.IGNORECASE)
+JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+LONG_ID_RE = re.compile(r"\b\d{8,}\b")
+PHONE_RE = re.compile(r"\b(?:\+?82[-.\s]?)?0\d{1,2}[-.\s]?\d{3,4}[-.\s]?\d{4}\b")
+SECRET_MARKERS = frozenset(
+    {
+        "access_secret",
+        "cookie_secret",
+        "customer_secret",
+        "jwt_secret",
+        "member_secret",
+        "password_secret",
+        "phone_secret",
+        "raw_body_secret",
+        "secret_canary",
+        "token_secret",
+        "user_id_secret",
+    }
+)
 
 
 def _deny_key(key: object) -> bool:
@@ -128,13 +180,31 @@ def _deny_key(key: object) -> bool:
     return normalized in DENY_KEYS or any(part in normalized for part in DENY_KEY_PARTS)
 
 
-def _sanitize(value: Any) -> Any:
+def _unsafe_string(value: str) -> bool:
+    """Return whether a string value looks sensitive or user-specific."""
+    lowered = value.lower()
+    return (
+        any(marker in lowered for marker in SECRET_MARKERS)
+        or EMAIL_RE.search(value) is not None
+        or JWT_RE.search(value) is not None
+        or PHONE_RE.search(value) is not None
+        or LONG_ID_RE.search(value) is not None
+    )
+
+
+def _sanitize(value: Any, *, protected_keys: frozenset[str] = frozenset()) -> Any:
     """Return a JSON-serializable value after recursively dropping denied keys."""
     if isinstance(value, dict):
-        return {str(key): _sanitize(item) for key, item in value.items() if not _deny_key(key)}
+        return {
+            str(key): _sanitize(item, protected_keys=protected_keys)
+            for key, item in value.items()
+            if str(key) in protected_keys or not _deny_key(key)
+        }
     if isinstance(value, list | tuple | set | frozenset):
-        return [_sanitize(item) for item in value]
-    if isinstance(value, str | int | float | bool) or value is None:
+        return [_sanitize(item, protected_keys=protected_keys) for item in value]
+    if isinstance(value, str):
+        return "[redacted]" if _unsafe_string(value) else value
+    if isinstance(value, int | float | bool) or value is None:
         return value
     return str(type(value).__name__)
 
@@ -190,9 +260,10 @@ def _error_categories(errors: Any) -> dict[str, int]:
         return {}
     categories: Counter[str] = Counter()
     for value in errors.values():
-        category = str(value).split(":", 1)[0]
-        if category:
-            categories[category] += 1
+        category = (
+            value if isinstance(value, str) and value in SAFE_ERROR_CATEGORIES else "unknown_error"
+        )
+        categories[category] += 1
     return dict(sorted(categories.items()))
 
 
@@ -224,7 +295,7 @@ async def async_get_config_entry_diagnostics(
         },
         DENY_KEYS,
     )
-    _sanitize(redacted_source)
+    sanitized_source = _sanitize(redacted_source)
 
     runtime_data = getattr(entry, "runtime_data", None)
     coordinator = getattr(runtime_data, "coordinator", None)
@@ -259,7 +330,10 @@ async def async_get_config_entry_diagnostics(
         },
         "error_categories": _error_categories(getattr(data, "errors_by_customer_key", {})),
     }
-    return cast("dict[str, Any]", _json_safe(summary))
+    sanitized_summary = _sanitize(summary, protected_keys=SUMMARY_SAFE_KEYS)
+    if not isinstance(sanitized_source, dict) or not isinstance(sanitized_summary, dict):
+        return {}
+    return cast("dict[str, Any]", _json_safe(sanitized_summary))
 
 
 __all__ = ["async_get_config_entry_diagnostics"]
