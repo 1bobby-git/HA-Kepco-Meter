@@ -177,6 +177,29 @@ def test_parse_customers_accepts_multiple_my_page_append_list() -> None:
     assert customers[0].stable_key != customers[1].stable_key
 
 
+def test_parse_customers_accepts_customer_number_list_without_display_fields() -> None:
+    customers = parse_customers(
+        {
+            "dlt_myPageAppendList": [
+                {
+                    "CUST_NO": "TEST_CUST_001",
+                    "SI_CUST_NO": "TEST_HOUSE_001",
+                    "cntrMthdCd": "아파트(단일계약)",
+                }
+            ]
+        },
+        "ACCOUNT_HASH",
+    )
+
+    assert len(customers) == 1
+    customer = customers[0]
+    assert customer.customer_number == "TEST_CUST_001"
+    assert customer.house_contract_number == "TEST_HOUSE_001"
+    assert customer.apartment_name == "한전ON 고객 1"
+    assert customer.dong == "미확인"
+    assert customer.ho == "미확인"
+
+
 def test_parse_customers_rejects_empty_list() -> None:
     with pytest.raises(KepcoOnNoCustomersError):
         parse_customers({"dlt_appendList": []}, "ACCOUNT_HASH")
@@ -202,9 +225,6 @@ def test_parse_customers_rejects_malformed_customer_list_shapes(
     [
         {"CUST_NO": ""},
         {"SI_CUST_NO": ""},
-        {"APT_NAME": ""},
-        {"APT_DONGNO": ""},
-        {"APT_HONO": ""},
         {"cntrMthdCd": 1},
         {"cntrMthdCd": "other"},
     ],
@@ -220,7 +240,24 @@ def test_parse_customers_rejects_missing_or_unsupported_customer_fields(
         parse_customers(payload, "ACCOUNT_HASH")
 
 
-def test_parse_customers_rejects_generic_only_customer_aliases() -> None:
+@pytest.mark.parametrize(
+    "row_update",
+    [
+        {"APT_NAME": 1},
+        {"APT_DONGNO": 1},
+        {"APT_HONO": 1},
+    ],
+)
+def test_parse_customers_rejects_invalid_display_field_types(row_update: dict[str, object]) -> None:
+    payload = load_fixture("customer_list_single.json")
+    row = as_object_dict(cast(list[object], payload["dlt_appendList"])[0])
+    row.update(row_update)
+
+    with pytest.raises(KepcoOnProtocolError):
+        parse_customers(payload, "ACCOUNT_HASH")
+
+
+def test_parse_customers_ignores_unproven_display_aliases() -> None:
     payload = load_fixture("customer_list_single.json")
     row = as_object_dict(cast(list[object], payload["dlt_appendList"])[0])
     row.pop("APT_NAME")
@@ -228,8 +265,11 @@ def test_parse_customers_rejects_generic_only_customer_aliases() -> None:
     row.pop("APT_HONO")
     row.update({"APT_NM": "TEST_APT_ALIAS", "DONG_NO": "1001", "HO_NO": "0101"})
 
-    with pytest.raises(KepcoOnProtocolError):
-        parse_customers(payload, "ACCOUNT_HASH")
+    customer = parse_customers(payload, "ACCOUNT_HASH")[0]
+
+    assert customer.apartment_name == "한전ON 고객 1"
+    assert customer.dong == "미확인"
+    assert customer.ho == "미확인"
 
 
 def test_parse_customer_repr_does_not_expose_raw_identifiers() -> None:

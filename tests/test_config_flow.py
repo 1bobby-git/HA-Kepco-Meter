@@ -614,7 +614,7 @@ async def test_user_step_protocol_log_contains_only_safe_stage_and_field(
     FakeClient.customer_results = [KepcoOnProtocolError("APT_NAME is missing")]
     flow = make_flow()
 
-    with caplog.at_level(logging.WARNING, logger="custom_components.kepco_on.config_flow"):
+    with caplog.at_level(logging.ERROR, logger="custom_components.kepco_on.config_flow"):
         result = await submit_user(
             flow,
             **{
@@ -629,6 +629,7 @@ async def test_user_step_protocol_log_contains_only_safe_stage_and_field(
     assert "during customers" in caplog.text
     assert "KepcoOnProtocolError" in caplog.text
     assert "APT_NAME is missing" in caplog.text
+    assert caplog.records[-1].levelno == logging.ERROR
     assert username not in caplog.text
     assert password not in caplog.text
 

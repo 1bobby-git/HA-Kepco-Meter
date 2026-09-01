@@ -106,12 +106,13 @@ def parse_customers(payload: dict[str, object], account_uid_hash: str) -> tuple[
         customer_number = _required_str(row, "CUST_NO")
         house_contract_number = _required_str(row, "SI_CUST_NO")
         stable_key = _stable_customer_key(account_uid_hash, customer_number, house_contract_number)
+        display_index = index + 1
         customers.append(
             KepcoCustomer(
                 stable_key=stable_key,
-                apartment_name=_required_str(row, "APT_NAME"),
-                dong=_required_str(row, "APT_DONGNO"),
-                ho=_required_str(row, "APT_HONO"),
+                apartment_name=_optional_str(row, "APT_NAME") or f"한전ON 고객 {display_index}",
+                dong=_optional_str(row, "APT_DONGNO") or "미확인",
+                ho=_optional_str(row, "APT_HONO") or "미확인",
                 contract_method=contract_method,
                 is_supported=contract_method == SUPPORTED_APARTMENT_CONTRACT,
                 _customer_number=customer_number,
