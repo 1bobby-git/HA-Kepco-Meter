@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import yaml
 from packaging.requirements import Requirement
+from packaging.version import Version
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOWS = ROOT / ".github" / "workflows"
@@ -250,8 +251,13 @@ def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     manifest = load_json(ROOT / "custom_components" / "kepco_on" / "manifest.json")
     hacs = load_json(ROOT / "hacs.json")
     package = load_json(ROOT / "package.json")
+    pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    release_version = Version(cast("str", manifest["version"]))
 
-    assert manifest["version"] == "0.1.0"
+    assert release_version == Version(cast("str", pyproject["project"]["version"]))
+    assert release_version == Version("0.1.1")
+    assert release_version.is_prerelease is False
+    assert release_version.is_devrelease is False
     assert manifest["requirements"] == []
     assert hacs["homeassistant"] == "2026.8.3"
     assert package["private"] is True
