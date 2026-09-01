@@ -236,15 +236,19 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         abort_reason: str | None = None
         form_error: str | None = None
         login_succeeded = False
+        validation_stage = "login"
         try:
             store = FlowSessionStore()
             auth = KepcoOnAuth(client_session, store=store)
             session = await auth.async_login(user_input[CONF_USERNAME], user_input[CONF_PASSWORD])
             client = KepcoOnClient(auth)
+            validation_stage = "account_type"
             await client.async_get_account_type()
+            validation_stage = "customers"
             customers = await client.async_get_customers()
             if not customers:
                 raise KepcoOnNoCustomersError("No KEPCO ON apartment customers found")
+            validation_stage = "unique_id"
             account_uid_hash = _account_uid_hash(session.user_id)
             await self.async_set_unique_id(account_uid_hash)
             self._abort_if_unique_id_configured()
@@ -252,6 +256,12 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         except AbortFlow as err:
             abort_reason = err.reason
         except EXPECTED_CONFIG_FLOW_ERRORS as err:
+            _LOGGER.warning(
+                "KEPCO ON config flow failed during %s (%s): %s",
+                validation_stage,
+                type(err).__name__,
+                err,
+            )
             form_error = _map_error(err)
         finally:
             if not login_succeeded:

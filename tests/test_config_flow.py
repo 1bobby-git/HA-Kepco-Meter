@@ -605,6 +605,35 @@ async def test_user_step_maps_validation_errors(
 
 
 @pytest.mark.asyncio
+async def test_user_step_protocol_log_contains_only_safe_stage_and_field(
+    patched_flow_dependencies: list[FakeSession],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    username = "USER_SECRET_CANARY"
+    password = "PASSWORD_SECRET_CANARY"
+    FakeClient.customer_results = [KepcoOnProtocolError("APT_NAME is missing")]
+    flow = make_flow()
+
+    with caplog.at_level(logging.WARNING, logger="custom_components.kepco_on.config_flow"):
+        result = await submit_user(
+            flow,
+            **{
+                CONF_USERNAME: username,
+                CONF_PASSWORD: password,
+                CONF_SAVE_PASSWORD: False,
+            },
+        )
+
+    assert result["errors"] == {"base": "protocol_changed"}
+    assert patched_flow_dependencies[0].closed is True
+    assert "during customers" in caplog.text
+    assert "KepcoOnProtocolError" in caplog.text
+    assert "APT_NAME is missing" in caplog.text
+    assert username not in caplog.text
+    assert password not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_user_step_unexpected_error_propagates_after_cleanup(
     patched_flow_dependencies: list[FakeSession],
 ) -> None:
