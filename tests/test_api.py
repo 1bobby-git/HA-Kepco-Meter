@@ -442,6 +442,82 @@ async def test_transport_honors_http_date_retry_after_then_raises_rate_limit() -
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("retry_after", [None, "not-a-date"])
+async def test_transport_invalid_retry_after_sleeps_zero_then_raises_rate_limit(
+    retry_after: str | None,
+) -> None:
+    server = ResponsesMockServer()
+    response = json_response({"error": "rate"}, status=429)
+    if retry_after is not None:
+        response.headers["Retry-After"] = retry_after
+    server.add(HOST, "/sessionCheck", "post", response=response)
+
+    with pytest.raises(KepcoOnRateLimitError):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+    assert SLEEP_CALLS == [0.0]
+
+
+@pytest.mark.asyncio
+async def test_transport_treats_naive_http_date_retry_after_as_utc() -> None:
+    now = datetime(2026, 9, 1, 1, 0, tzinfo=UTC)
+    server = ResponsesMockServer()
+    response = json_response({"error": "rate"}, status=429)
+    response.headers["Retry-After"] = "Tue, 01 Sep 2026 01:00:05"
+    server.add(HOST, "/sessionCheck", "post", response=response)
+
+    with pytest.raises(KepcoOnRateLimitError):
+        await with_transport(
+            lambda transport: transport.request_json("/sessionCheck", {}, clock=lambda: now),
+            server,
+        )
+
+    assert SLEEP_CALLS == [5.0]
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_unallowlisted_path_before_request() -> None:
+    async with ClientSession() as session:
+        transport = KepcoOnTransport(session, sleep=sleep_recorder)
+        with pytest.raises(KepcoOnProtocolError) as raised:
+            await transport.request_json("/not-allowed", {})
+
+    assert str(raised.value) == "Unexpected KEPCO ON response: path is not allowlisted"
+    assert SLEEP_CALLS == []
+
+
+@pytest.mark.asyncio
+async def test_transport_empty_body_with_whitespace_returns_empty_payload() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(body=b" \r\n\t ", content_type="application/json"),
+    )
+
+    result = await with_transport(
+        lambda transport: transport.request_json("/sessionCheck", {}), server
+    )
+
+    assert result == {}
+
+
+@pytest.mark.asyncio
+async def test_transport_rejects_json_array_root() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(text='["not-object"]', content_type="application/json"),
+    )
+
+    with pytest.raises(KepcoOnProtocolError):
+        await with_transport(lambda transport: transport.request_json("/sessionCheck", {}), server)
+
+
+@pytest.mark.asyncio
 async def test_transport_retries_5xx_twice_with_exponential_backoff() -> None:
     server = ResponsesMockServer()
     server.add(HOST, "/sessionCheck", "post", response=json_response({"error": "bad"}, status=503))
@@ -699,6 +775,32 @@ async def test_client_rejects_bad_or_future_month_before_request() -> None:
         with pytest.raises(KepcoOnProtocolError):
             await client.async_get_bill(customer, month)
 
+    assert auth.requests == 0
+
+
+@pytest.mark.asyncio
+async def test_client_rejects_month_before_supported_range_before_request() -> None:
+    class Auth:
+        requests = 0
+
+        async def async_protected_request(
+            self, path: str, payload: dict[str, object] | None, *, submission_id: str | None = None
+        ) -> dict[str, object]:
+            del path, payload, submission_id
+            self.requests += 1
+            return {}
+
+        def account_uid_hash(self) -> str:
+            return "ACCOUNT_HASH"
+
+    auth = Auth()
+    customer = KepcoCustomer("key", "apt", "101", "1001", "method", True, "CUST", "HOUSE")
+    client = KepcoOnClient(cast("Any", auth), clock=lambda: datetime(2026, 9, 1, tzinfo=UTC))
+
+    with pytest.raises(KepcoOnProtocolError) as raised:
+        await client.async_get_bill(customer, "199912")
+
+    assert str(raised.value) == "month is outside supported range"
     assert auth.requests == 0
 
 

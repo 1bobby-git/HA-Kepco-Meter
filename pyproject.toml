@@ -16,6 +16,10 @@ source = ["custom_components/kepco_on"]
 fail_under = 95
 show_missing = true
 skip_covered = true
+exclude_also = [
+  "^class .*\\(Protocol\\):$",
+  "^if TYPE_CHECKING:$",
+]
 
 [tool.ruff]
 line-length = 100

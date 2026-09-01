@@ -286,3 +286,49 @@ async def test_diagnostics_handles_missing_or_malformed_runtime_safely() -> None
     assert diagnostics["availability"] == {"customers": 0, "bills": 0, "bill_errors": 0}
     assert TOKEN_SECRET not in encoded
     assert PASSWORD_SECRET not in encoded
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_falls_back_for_malformed_options_and_non_sized_values() -> None:
+    from custom_components.kepco_on.diagnostics import async_get_config_entry_diagnostics
+
+    entry = FakeConfigEntry(runtime_data=None)
+    cast("dict[str, Any]", entry.data)[CONF_SELECTED_CUSTOMERS] = object()
+    entry.options = cast("dict[str, Any]", object())
+
+    diagnostics = await async_get_config_entry_diagnostics(cast("Any", FakeHass()), entry)
+
+    assert diagnostics["config_entry"]["polling_interval_hours"] == 6
+    assert diagnostics["config_entry"]["selected_customer_count"] == 0
+    assert diagnostics["runtime"]["loaded"] is False
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_handles_bad_polling_option_and_dataclass_probe_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on.diagnostics as diagnostics_module
+    from custom_components.kepco_on.diagnostics import async_get_config_entry_diagnostics
+
+    monkeypatch.setattr(diagnostics_module, "KepcoBill", object)
+    entry = FakeConfigEntry(runtime_data=None)
+    entry.options[OPT_POLLING_INTERVAL_HOURS] = object()
+
+    diagnostics = await async_get_config_entry_diagnostics(cast("Any", FakeHass()), entry)
+
+    assert diagnostics["config_entry"]["polling_interval_hours"] == 6
+    assert diagnostics["parsed_fields"]["bill"] == []
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_returns_empty_mapping_if_sanitizer_shape_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on.diagnostics as diagnostics_module
+    from custom_components.kepco_on.diagnostics import async_get_config_entry_diagnostics
+
+    monkeypatch.setattr(diagnostics_module, "_sanitize", lambda value, **kwargs: object())
+
+    assert (
+        await async_get_config_entry_diagnostics(cast("Any", FakeHass()), FakeConfigEntry()) == {}
+    )

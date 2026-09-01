@@ -841,6 +841,19 @@ def test_coordinator_default_and_option_intervals() -> None:
     assert custom_coordinator.update_interval == timedelta(hours=1)
 
 
+def test_coordinator_invalid_option_interval_falls_back_to_default() -> None:
+    from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
+
+    coordinator = KepcoOnDataUpdateCoordinator(
+        cast("Any", Mock()),
+        cast("Any", make_entry(options={OPT_POLLING_INTERVAL_HOURS: object()})),
+        cast("Any", FakeClient(cast("Any", object()))),
+        (customer("key-1"),),
+    )
+
+    assert coordinator.update_interval == timedelta(hours=DEFAULT_POLLING_INTERVAL_HOURS)
+
+
 @pytest.mark.asyncio
 async def test_coordinator_fetches_selected_customers_sequentially_and_records_success() -> None:
     from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
@@ -980,6 +993,70 @@ async def test_coordinator_all_customers_failed_raises_update_failed() -> None:
 
     with pytest.raises(UpdateFailed):
         await coordinator._async_update_data()
+
+
+@pytest.mark.asyncio
+async def test_coordinator_records_unknown_error_for_unexpected_customer_exception() -> None:
+    from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
+
+    client = FakeClient(cast("Any", object()))
+    customers = (customer("key-1"), customer("key-2"))
+    FakeClient.bill_results = [bill("202608", 111), RuntimeError(f"boom {TOKEN_SECRET}")]
+    coordinator = KepcoOnDataUpdateCoordinator(
+        cast("Any", Mock()),
+        cast("Any", make_entry(customers=customers, selected=["key-1", "key-2"])),
+        cast("Any", client),
+        customers,
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert data.bills_by_customer_key == {"key-1": bill("202608", 111)}
+    assert data.errors_by_customer_key == {"key-2": "unknown_error"}
+    assert TOKEN_SECRET not in repr(data)
+
+
+@pytest.mark.asyncio
+async def test_coordinator_records_no_customer_and_api_errors_by_safe_category() -> None:
+    from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
+
+    client = FakeClient(cast("Any", object()))
+    customers = (customer("key-1"), customer("key-2"), customer("key-3"))
+    FakeClient.bill_results = [
+        bill("202608", 111),
+        KepcoOnNoCustomersError("none"),
+        KepcoOnUnsupportedAccount(f"bad {TOKEN_SECRET}"),
+    ]
+    coordinator = KepcoOnDataUpdateCoordinator(
+        cast("Any", Mock()),
+        cast("Any", make_entry(customers=customers, selected=["key-1", "key-2", "key-3"])),
+        cast("Any", client),
+        customers,
+    )
+
+    data = await coordinator._async_update_data()
+
+    assert data.errors_by_customer_key == {"key-2": "no_customers", "key-3": "api_error"}
+    assert TOKEN_SECRET not in repr(data)
+
+
+@pytest.mark.asyncio
+async def test_coordinator_all_unexpected_customer_errors_raise_update_failed() -> None:
+    from custom_components.kepco_on.coordinator import KepcoOnDataUpdateCoordinator
+
+    client = FakeClient(cast("Any", object()))
+    FakeClient.bill_results = [RuntimeError(f"boom {TOKEN_SECRET}")]
+    coordinator = KepcoOnDataUpdateCoordinator(
+        cast("Any", Mock()),
+        cast("Any", make_entry()),
+        cast("Any", client),
+        (customer("key-1"),),
+    )
+
+    with pytest.raises(UpdateFailed) as raised:
+        await coordinator._async_update_data()
+
+    assert TOKEN_SECRET not in str(raised.value)
 
 
 @pytest.mark.asyncio

@@ -74,6 +74,12 @@ def test_parse_int_rejects_nonempty_invalid_value() -> None:
         parse_int("not-a-number", "amount")
 
 
+@pytest.mark.parametrize("value", [True, object()])
+def test_parse_int_rejects_bool_and_non_string_values(value: object) -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_int(value, "amount")
+
+
 @pytest.mark.parametrize(
     "value",
     ["1,2,3", "\uff11", "\uff11\uff12\uff13", "+123", "--123", "123-"],
@@ -90,11 +96,31 @@ def test_parse_date_is_strict() -> None:
         parse_date("20260230", "period_end")
 
 
+@pytest.mark.parametrize(("value", "expected"), [(None, None), ("", None), ("null", None)])
+def test_parse_date_accepts_empty_kepco_values(value: object, expected: date | None) -> None:
+    assert parse_date(value, "period_end") == expected
+
+
+def test_parse_date_rejects_non_string_values() -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_date(20260731, "period_end")
+
+
 def test_parse_year_month_is_strict() -> None:
     assert parse_year_month("202607", "bill_month") == "202607"
 
     with pytest.raises(KepcoOnProtocolError):
         parse_year_month("202613", "bill_month")
+
+
+@pytest.mark.parametrize(("value", "expected"), [(None, None), ("", None), ("null", None)])
+def test_parse_year_month_accepts_empty_kepco_values(value: object, expected: str | None) -> None:
+    assert parse_year_month(value, "bill_month") == expected
+
+
+def test_parse_year_month_rejects_non_string_values() -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_year_month(202607, "bill_month")
 
 
 @pytest.mark.parametrize(
@@ -154,6 +180,44 @@ def test_parse_customers_accepts_multiple_my_page_append_list() -> None:
 def test_parse_customers_rejects_empty_list() -> None:
     with pytest.raises(KepcoOnNoCustomersError):
         parse_customers({"dlt_appendList": []}, "ACCOUNT_HASH")
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"dlt_appendList": "not-list"},
+        {"dlt_appendList": ["not-object"]},
+        {},
+    ],
+)
+def test_parse_customers_rejects_malformed_customer_list_shapes(
+    payload: dict[str, object],
+) -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_customers(payload, "ACCOUNT_HASH")
+
+
+@pytest.mark.parametrize(
+    "row_update",
+    [
+        {"CUST_NO": ""},
+        {"SI_CUST_NO": ""},
+        {"APT_NAME": ""},
+        {"APT_DONGNO": ""},
+        {"APT_HONO": ""},
+        {"cntrMthdCd": 1},
+        {"cntrMthdCd": "other"},
+    ],
+)
+def test_parse_customers_rejects_missing_or_unsupported_customer_fields(
+    row_update: dict[str, object],
+) -> None:
+    payload = load_fixture("customer_list_single.json")
+    row = as_object_dict(cast(list[object], payload["dlt_appendList"])[0])
+    row.update(row_update)
+
+    with pytest.raises(KepcoOnProtocolError):
+        parse_customers(payload, "ACCOUNT_HASH")
 
 
 def test_parse_customer_repr_does_not_expose_raw_identifiers() -> None:
@@ -275,6 +339,16 @@ def test_parse_bill_requires_successful_rsmsg_status(payload: dict[str, object])
         parse_bill(payload, None)
 
 
+def test_parse_bill_requires_object_dma_result() -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_bill({"rsMsg": {"statusCode": "S"}, "dma_result": []}, None)
+
+
+def test_parse_bill_requires_effective_month_from_request_or_response() -> None:
+    with pytest.raises(KepcoOnProtocolError):
+        parse_bill({"rsMsg": {"statusCode": "S"}}, None)
+
+
 def test_parse_bill_history_must_be_sorted_unique_and_valid() -> None:
     base = load_fixture("bill_latest.json")
 
@@ -294,6 +368,27 @@ def test_parse_bill_history_must_be_sorted_unique_and_valid() -> None:
         parse_bill(invalid, None)
 
 
+@pytest.mark.parametrize(
+    "history",
+    [
+        "not-list",
+        ["not-object"],
+        [{}],
+        [{"BILL_YM": "202608"}, {"BILL_YM": "202607"}],
+    ],
+)
+def test_parse_bill_rejects_malformed_history_shapes(history: object) -> None:
+    payload = {
+        "rsMsg": {"statusCode": "S"},
+        "DO_ERR_CODE": "HXI001",
+        "DO_BILL_YM": "202608",
+        "history": history,
+    }
+
+    with pytest.raises(KepcoOnProtocolError):
+        parse_bill(payload, None)
+
+
 def test_parse_bill_rejects_large_response_history_month_contradiction() -> None:
     payload = load_fixture("bill_202607.json")
     result = as_object_dict(payload["dma_result"])
@@ -301,6 +396,50 @@ def test_parse_bill_rejects_large_response_history_month_contradiction() -> None
 
     with pytest.raises(KepcoOnProtocolError):
         parse_bill(payload, requested_month="202607")
+
+
+def test_parse_bill_rejects_history_range_that_misses_effective_month() -> None:
+    payload: dict[str, object] = {
+        "rsMsg": {"statusCode": "S"},
+        "DO_ERR_CODE": "HXI001",
+        "DO_BILL_YM": "202608",
+        "history": [{"BILL_YM": "202607"}],
+    }
+
+    with pytest.raises(KepcoOnProtocolError):
+        parse_bill(payload, requested_month=None)
+
+
+def test_parse_bill_accepts_december_history_with_next_january_response_month() -> None:
+    payload: dict[str, object] = {
+        "rsMsg": {"statusCode": "S"},
+        "DO_ERR_CODE": "HXI001",
+        "DO_BILL_YM": "202701",
+        "history": [{"BILL_YM": "202612"}],
+    }
+
+    bill = parse_bill(
+        payload,
+        requested_month="202612",
+    )
+
+    assert bill.bill_month == "202612"
+    assert bill.response_bill_month == "202701"
+
+
+def test_parse_bill_uses_fallback_mapping_when_dma_result_omits_values() -> None:
+    bill = parse_bill(
+        {
+            "rsMsg": {"statusCode": "S"},
+            "dma_result": {},
+            "BILL_YM": "202608",
+            "USE_QTY": "111",
+        },
+        None,
+    )
+
+    assert bill.bill_month == "202608"
+    assert bill.usage_kwh == 111
 
 
 def test_parse_bill_empty_values_are_none_and_comma_numbers_work() -> None:

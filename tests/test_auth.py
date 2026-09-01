@@ -15,6 +15,7 @@ from aresponses import Response, ResponsesMockServer
 from custom_components.kepco_on.auth import KepcoOnAuth
 from custom_components.kepco_on.exceptions import (
     KepcoOnAuthError,
+    KepcoOnProtocolError,
     KepcoOnSessionExpired,
 )
 from custom_components.kepco_on.models import KepcoAccountSession
@@ -221,6 +222,19 @@ async def test_validate_session_false_raises_expired_without_saving() -> None:
         await auth.async_restore_session()
         assert await auth.async_validate_session() is False
         assert len(store.saved) == 0
+
+
+@pytest.mark.asyncio
+async def test_validate_session_expired_response_returns_false_without_saving() -> None:
+    server = ResponsesMockServer()
+    server.add(HOST, "/sessionCheck", "post", response=json_response({"expired": True}, status=401))
+    store = MemorySessionStore(make_session())
+    async with auth_context(server, store) as auth:
+        await auth.async_restore_session()
+
+        assert await auth.async_validate_session() is False
+
+    assert store.saved == []
 
 
 @pytest.mark.asyncio
@@ -440,6 +454,27 @@ async def test_export_session_snapshot_raises_when_no_session() -> None:
 
 
 @pytest.mark.asyncio
+async def test_account_hash_and_validate_require_current_session() -> None:
+    async with auth_context(ResponsesMockServer(), MemorySessionStore()) as auth:
+        with pytest.raises(KepcoOnSessionExpired):
+            auth.account_uid_hash()
+        with pytest.raises(KepcoOnSessionExpired):
+            await auth.async_validate_session()
+
+
+@pytest.mark.asyncio
+async def test_auth_requires_aiohttp_cookiejar() -> None:
+    class SessionWithoutAiohttpCookieJar:
+        cookie_jar = object()
+
+    with pytest.raises(KepcoOnProtocolError):
+        KepcoOnAuth(
+            cast("ClientSession", SessionWithoutAiohttpCookieJar()),
+            store=MemorySessionStore(),
+        )
+
+
+@pytest.mark.asyncio
 async def test_sso_check_non_y_raises_if_fallback_is_used() -> None:
     server = ResponsesMockServer()
     server.add(HOST, "/ssoCheck", "post", response=json_response({"loginChk": "N"}))
@@ -481,6 +516,62 @@ async def test_sso_check_posts_exact_contract_and_rotates_refresh_token() -> Non
     assert "submissionid" not in {key.lower() for key in headers}
     assert refresh_token == "REFRESH_SSO_ROTATED"
     assert store.saved[-1].refresh_token == "REFRESH_SSO_ROTATED"
+
+
+@pytest.mark.asyncio
+async def test_sso_check_returns_current_refresh_token_when_payload_omits_rotation() -> None:
+    for payload in ({"loginChk": "Y"}, {"loginChk": "Y", "refreshToken": ""}):
+        server = ResponsesMockServer()
+        server.add(HOST, "/ssoCheck", "post", response=json_response(payload))
+        store = MemorySessionStore(make_session())
+        async with auth_context(server, store) as auth:
+            await auth.async_restore_session()
+            assert await auth.async_sso_check() == REFRESH_SECRET
+        assert store.saved == []
+
+
+@pytest.mark.asyncio
+async def test_sso_check_requires_user_sequence_before_request() -> None:
+    session = make_session()
+    session = KepcoAccountSession(
+        refresh_token=session.refresh_token,
+        token=session.token,
+        user_id=session.user_id,
+        member_name=session.member_name,
+        user_mng_seqno=None,
+        updated_at=session.updated_at,
+    )
+    async with auth_context(ResponsesMockServer(), MemorySessionStore(session)) as auth:
+        await auth.async_restore_session()
+        with pytest.raises(KepcoOnProtocolError) as raised:
+            await auth.async_sso_check()
+
+    assert str(raised.value) == "KEPCO ON session is missing user sequence"
+
+
+@pytest.mark.asyncio
+async def test_login_rejects_non_string_optional_payload_field() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/cyb/me/login/indi/api",
+        "post",
+        response=json_response(
+            {
+                "result": "YES",
+                "token": 123,
+                "refreshToken": REFRESH_SECRET,
+                "userId": "USER_ID_SECRET_CANARY",
+                "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+            }
+        ),
+    )
+    async with auth_context(server, MemorySessionStore()) as auth:
+        with pytest.raises(KepcoOnAuthError) as raised:
+            await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+
+    assert "token" in str(raised.value)
+    assert_no_secret(str(raised.value))
 
 
 @pytest.mark.asyncio
