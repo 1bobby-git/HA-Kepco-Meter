@@ -1,0 +1,46 @@
+name: Apply final formatting fix
+
+on:
+  push:
+    branches:
+      - fix/clean-device-names
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/clean-device-names
+      - name: Format config flow and remove this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("custom_components/kepco_on/config_flow.py")
+          source = path.read_text(encoding="utf-8")
+          source = source.replace(
+              "def _config_entry_title(\n    entry_data: Mapping[str, Any], customers: Sequence[KepcoCustomer]\n) -> str:\n",
+              "def _config_entry_title(entry_data: Mapping[str, Any], customers: Sequence[KepcoCustomer]) -> str:\n",
+              1,
+          )
+          path.write_text(source, encoding="utf-8")
+          PY
+          rm .github/workflows/format-clean-name-fix.yml
+      - name: Commit changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'style: format clean-name config flow'
+          git push origin HEAD:fix/clean-device-names
