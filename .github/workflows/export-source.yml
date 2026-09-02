@@ -1,28 +1,37 @@
-name: Export branch source
+name: Apply five-sensor update
 
 on:
   push:
     branches:
       - feature/five-sensor-devices
-  workflow_dispatch:
+    paths:
+      - .github/five-sensor-update.patch
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  export:
+  apply:
+    name: Apply prepared source patch
     runs-on: ubuntu-24.04
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-
-      - name: Create source archive
-        run: tar --exclude=.git -czf /tmp/ha-kepco-meter.tar.gz .
-
-      - name: Upload source archive
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # source: actions/checkout@v7
         with:
-          name: ha-kepco-meter-source
-          path: /tmp/ha-kepco-meter.tar.gz
-          retention-days: 1
+          ref: feature/five-sensor-devices
+          fetch-depth: 0
+
+      - name: Apply, verify, and commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git apply --index .github/five-sensor-update.patch
+          rm .github/five-sensor-update.patch
+          rm .github/workflows/export-source.yml
+          git add -A
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "feat: reorganize KEPCO sensors into five devices"
+          git push origin HEAD:feature/five-sensor-devices
