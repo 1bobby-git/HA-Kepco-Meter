@@ -284,7 +284,7 @@ def test_release_workflow_waits_for_both_ci_workflows_and_publishes_hacs_archive
     assert "continue-on-error" not in source
 
     release_notes = (ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
-    assert release_notes.startswith("## 한전ON v0.2.2\n")
+    assert release_notes.startswith("## 한전ON v0.2.3\n")
     assert "전기요금 계" in release_notes
     assert "접두어" in release_notes
 
@@ -297,7 +297,7 @@ def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     release_version = Version(cast("str", manifest["version"]))
 
     assert release_version == Version(cast("str", pyproject["project"]["version"]))
-    assert release_version == Version("0.2.2")
+    assert release_version == Version("0.2.3")
     assert release_version.is_prerelease is False
     assert release_version.is_devrelease is False
     assert manifest["requirements"] == []
