@@ -4,8 +4,9 @@ from homeassistant.const import CONF_PASSWORD, Platform
 
 DOMAIN = "kepco_on"
 NAME = "KEPCO ON"
-VERSION = "0.2.0"
-CONFIG_ENTRY_VERSION = 2
+DEFAULT_TITLE = "한전ON"
+VERSION = "0.2.1"
+CONFIG_ENTRY_VERSION = 3
 
 BASE_URL = "https://online.kepco.co.kr"
 PAGE_URL = "https://online.kepco.co.kr/MYM001D00"
@@ -75,6 +76,7 @@ __all__ = [
     "DATA_IS_SUPPORTED",
     "DATA_STABLE_KEY",
     "DEFAULT_CO2_FACTOR_KG_PER_KWH",
+    "DEFAULT_TITLE",
     "DEFAULT_POLLING_INTERVAL_HOURS",
     "DOMAIN",
     "ENDPOINT_APT_BILL_DETAIL",

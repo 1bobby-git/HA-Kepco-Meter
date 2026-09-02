@@ -17,9 +17,11 @@ from homeassistant.util import dt as dt_util
 from .api import KepcoOnClient
 from .auth import KepcoOnAuth
 from .const import (
+    CONF_DISPLAY_NAME,
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
     CONFIG_ENTRY_VERSION,
+    DEFAULT_TITLE,
     OPT_ENABLE_CO2_ESTIMATE,
     OPT_ENABLE_DETAILED_SENSORS,
     PLATFORMS,
@@ -33,7 +35,7 @@ from .exceptions import (
     KepcoOnRateLimitError,
     KepcoOnUnsupportedAccount,
 )
-from .models import strict_selected_stored_customers
+from .models import customer_selection_title, strict_selected_stored_customers
 from .repairs import async_clear_issue, async_create_issue
 from .services import async_setup_services
 from .session_store import KepcoOnSessionStore, session_from_payload
@@ -63,18 +65,28 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
 
 
 async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Migrate legacy optional sensor toggles to the five-device sensor model."""
+    """Migrate legacy sensor options and default presentation names."""
     if entry.version == CONFIG_ENTRY_VERSION:
         return True
-    if entry.version != 1:
+    if entry.version not in {1, 2}:
         return False
 
     options = dict(entry.options)
-    options.pop(OPT_ENABLE_DETAILED_SENSORS, None)
-    options.pop(OPT_ENABLE_CO2_ESTIMATE, None)
+    if entry.version == 1:
+        options.pop(OPT_ENABLE_DETAILED_SENSORS, None)
+        options.pop(OPT_ENABLE_CO2_ESTIMATE, None)
+
+    title = entry.title
+    if not entry.data.get(CONF_DISPLAY_NAME) and title == DEFAULT_TITLE:
+        try:
+            title = customer_selection_title(strict_selected_stored_customers(entry.data))
+        except ValueError:
+            pass
+
     hass.config_entries.async_update_entry(
         entry,
         options=options,
+        title=title,
         version=CONFIG_ENTRY_VERSION,
     )
     return True

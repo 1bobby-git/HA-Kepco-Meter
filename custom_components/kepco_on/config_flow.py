@@ -32,6 +32,7 @@ from .const import (
     CONFIG_ENTRY_VERSION,
     DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DEFAULT_POLLING_INTERVAL_HOURS,
+    DEFAULT_TITLE,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
     OPT_HISTORY_MONTHS,
@@ -50,14 +51,15 @@ from .exceptions import (
 from .models import (
     KepcoAccountSession,
     KepcoCustomer,
+    customer_selection_title,
     selected_customers,
     serialize_customer,
     stored_customers,
+    strict_selected_stored_customers,
     validate_selected_keys,
 )
 from .session_store import session_to_payload
 
-DEFAULT_TITLE = "한전ON"
 DEFAULT_HISTORY_MONTHS = 12
 MIN_CO2_FACTOR = 0.001
 
@@ -103,6 +105,21 @@ def _account_uid_hash(user_id: str) -> str:
 
 def _customer_label(customer: KepcoCustomer) -> str:
     return f"{customer.apartment_name} {customer.dong}동 {customer.ho}호"
+
+
+def _automatic_entry_title(entry: config_entries.ConfigEntry) -> str:
+    """Return the title generated from the entry's current selected units."""
+    try:
+        return customer_selection_title(strict_selected_stored_customers(entry.data))
+    except ValueError:
+        return DEFAULT_TITLE
+
+
+def _entry_uses_automatic_title(entry: config_entries.ConfigEntry) -> bool:
+    """Return whether selection changes may safely refresh the entry title."""
+    if entry.data.get(CONF_DISPLAY_NAME):
+        return False
+    return entry.title in {DEFAULT_TITLE, _automatic_entry_title(entry)}
 
 
 def _customer_options(customers: tuple[KepcoCustomer, ...]) -> list[selector.SelectOptionDict]:
@@ -313,14 +330,12 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         pending = self._pending
+        chosen_customers = selected_customers(pending.customers, selected)
         data: dict[str, Any] = {
             CONF_USERNAME: pending.username,
             CONF_SAVE_PASSWORD: pending.save_password,
             CONF_ACCOUNT_UID_HASH: pending.account_uid_hash,
-            CONF_CUSTOMERS: [
-                serialize_customer(customer)
-                for customer in selected_customers(pending.customers, selected)
-            ],
+            CONF_CUSTOMERS: [serialize_customer(customer) for customer in chosen_customers],
             CONF_SELECTED_CUSTOMERS: selected,
             CONF_SESSION_HANDOFF: session_to_payload(pending.session),
         }
@@ -328,7 +343,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data[CONF_DISPLAY_NAME] = pending.display_name
         if pending.save_password:
             data[CONF_PASSWORD] = pending.password
-        title = pending.display_name or DEFAULT_TITLE
+        title = pending.display_name or customer_selection_title(chosen_customers)
         await _close_session(pending.client_session)
         self._pending = None
         return self.async_create_entry(title=title, data=data)
@@ -402,16 +417,16 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors={"base": form_error},
             )
 
+        update_automatic_title = _entry_uses_automatic_title(entry)
         new_keys = {customer.stable_key for customer in customers}
         current = [str(value) for value in entry.data.get(CONF_SELECTED_CUSTOMERS, [])]
         preserved = [key for key in current if key in new_keys]
         if not preserved and customers:
             preserved = [customers[0].stable_key]
+        chosen_customers = selected_customers(customers, preserved)
         data = dict(entry.data)
         data[CONF_ACCOUNT_UID_HASH] = account_uid_hash
-        data[CONF_CUSTOMERS] = [
-            serialize_customer(customer) for customer in selected_customers(customers, preserved)
-        ]
+        data[CONF_CUSTOMERS] = [serialize_customer(customer) for customer in chosen_customers]
         data[CONF_SELECTED_CUSTOMERS] = preserved
         data[CONF_SESSION_HANDOFF] = session_to_payload(session)
         if data.get(CONF_SAVE_PASSWORD):
@@ -422,6 +437,11 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_update_reload_and_abort(
             entry,
             data=data,
+            title=(
+                customer_selection_title(chosen_customers)
+                if update_automatic_title
+                else entry.title
+            ),
             reason="reauth_successful",
         )
 
@@ -456,14 +476,19 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=_customer_schema(customers, current),
                 errors={"base": "invalid_selection"},
             )
+        update_automatic_title = _entry_uses_automatic_title(entry)
+        chosen_customers = selected_customers(customers, selected)
         data = dict(entry.data)
-        data[CONF_CUSTOMERS] = [
-            serialize_customer(customer) for customer in selected_customers(customers, selected)
-        ]
+        data[CONF_CUSTOMERS] = [serialize_customer(customer) for customer in chosen_customers]
         data[CONF_SELECTED_CUSTOMERS] = selected
         return self.async_update_reload_and_abort(
             entry,
             data=data,
+            title=(
+                customer_selection_title(chosen_customers)
+                if update_automatic_title
+                else entry.title
+            ),
             reason="reconfigure_successful",
         )
 

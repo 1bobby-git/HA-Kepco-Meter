@@ -3,7 +3,7 @@
 This document records the protocol evidence used by the integration without committing raw KEPCO ON captures.
 
 Document review date: 2026-09-02
-Integration version: `0.2.0`
+Integration version: `0.2.1`
 
 ## Evidence Baseline
 
@@ -21,7 +21,7 @@ Raw endpoint and wire artifacts are intentionally untracked. Do not publish raw 
 | Area | Confirmed | Not Yet Proven Live |
 | --- | --- | --- |
 | Login bootstrap | Fixed HTTPS GET `https://online.kepco.co.kr/MYM001D00` with redirects disabled. HTTP 200 is required. Empty body and empty or missing content type are allowed. Response size is bounded. Observed cookie names include `JSESSIONID` and `WMONID`, but no cookie name is required for success and bootstrap cookies are not persisted. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnTransport.async_prepare_login_session`. | Long-idle token lifetime remains untested. |
-| Login request | `/cyb/me/login/indi/api` receives a credential-bearing JSON object wrapped under `dma_loginData`, with `userId`, `pwdVal`, `autoFlag: "N"` and submission id `mf_login_popup_wframe_sbm_submission4`. The response is read from `dma_loginData2` when present, and one bounded same-session retry is allowed only for an empty object response. The User-Agent is `HomeAssistant-KEPCO-ON/0.2.0`. Code anchor: `custom_components/kepco_on/auth.py` `KepcoOnAuth._async_login_unlocked`; endpoint constant in `custom_components/kepco_on/const.py`. | Controlled invalid-password live test was not run to avoid account-lock risk. Conditional challenge variants remain untested. |
+| Login request | `/cyb/me/login/indi/api` receives a credential-bearing JSON object wrapped under `dma_loginData`, with `userId`, `pwdVal`, `autoFlag: "N"` and submission id `mf_login_popup_wframe_sbm_submission4`. The response is read from `dma_loginData2` when present, and one bounded same-session retry is allowed only for an empty object response. The User-Agent is `HomeAssistant-KEPCO-ON/0.2.1`. Code anchor: `custom_components/kepco_on/auth.py` `KepcoOnAuth._async_login_unlocked`; endpoint constant in `custom_components/kepco_on/const.py`. | Controlled invalid-password live test was not run to avoid account-lock risk. Conditional challenge variants remain untested. |
 | First-login check | `/me/login/firstLogin/check` exists in capture and tool scope. Code anchor: endpoint constant in `custom_components/kepco_on/const.py`. | Whether billing requires this endpoint in every fresh account/session case. |
 | Session validation | `/sessionCheck` sends `refreshToken`, `userId`, `mbrsNm` and rotates token fields when `result` is true. Code anchor: `custom_components/kepco_on/auth.py` `KepcoOnAuth.async_validate_session`. | Token lifetime and restart behavior after long idle periods. |
 | SSO check | `/ssoCheck` sends `userId`, `userMngSeqno`, `name`, `autoLogin: "Y"` and expects `loginChk: "Y"`. Code anchor: `custom_components/kepco_on/auth.py` `KepcoOnAuth.async_sso_check`. | Whether every deployment needs SSO check before protected requests. |
@@ -75,4 +75,4 @@ No raw response body, request body, header set, cookie value, HAR, trace, or scr
 
 ## Runtime Limitations
 
-Live HAOS validation on 2026-09-01 remains the proven baseline for `v0.1.1`: login, customer selection, current bill retrieval, response actions, restart recovery, 23 enabled entities, the neighbor comparison sensor, and `kg CO₂` rendering passed. Version `v0.2.0` changes only the parsed bill model and Home Assistant sensor/device presentation to five logical devices and 32 entities; a live HAOS/HACS upgrade of this new structure is not claimed by this document. The controlled invalid-password branch and long-idle token lifetime also remain untested.
+Live HAOS validation on 2026-09-01 remains the proven baseline for `v0.1.1`: login, customer selection, current bill retrieval, response actions, restart recovery, 23 enabled entities, the neighbor comparison sensor, and `kg CO₂` rendering passed. Version `v0.2.0` introduced the five-logical-device and 32-entity model. Version `v0.2.1` changes only Home Assistant naming, config-entry title migration, and the diagnostic grouping of the three meter-date fields; a live HAOS/HACS upgrade of these presentation changes is not claimed by this document. The controlled invalid-password branch and long-idle token lifetime also remain untested.

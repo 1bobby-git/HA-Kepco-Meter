@@ -9,7 +9,7 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 - 지원: 한전ON 개인 계정(`INDI`), 아파트/오피스텔 세대 단일 계약 요금.
 - 미지원: 법인 계정, 전기공사업체 계정, 인증서 로그인, OACX 간편인증 자동화, CAPTCHA/MFA 우회, Power Planner 실시간 사용량, CO2 실측값.
 - 통신: `https://online.kepco.co.kr`의 고정된 한전ON 경로만 사용하며 TLS 검증을 끄지 않습니다.
-- 버전: `v0.2.0`. 선택 세대마다 5개 논리 기기와 32개 센서 엔티티를 생성합니다.
+- 버전: `v0.2.1`. 선택 세대마다 5개 논리 기기와 32개 센서 엔티티를 생성합니다.
 
 ## 설치
 
@@ -32,7 +32,7 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 2. 자동 재인증이 필요하면 `비밀번호 저장`을 켭니다.
 3. 조회할 아파트 세대를 선택합니다. 선택 화면에는 개인정보 보호를 위해 아파트명, 동, 호만 표시됩니다.
 
-`비밀번호 저장`을 끄면 비밀번호는 저장하지 않습니다. 재시작/세션 복구를 위해 refresh token과 최소 세션 식별 정보는 private Home Assistant Store에 저장됩니다. `0.2.0`의 `PERSISTED_COOKIE_ALLOWLIST`는 비어 있으므로 `JSESSIONID`와 `WMONID` 값은 저장하지 않습니다. 저장된 세션이 만료되면 재인증이 필요할 수 있습니다.
+`비밀번호 저장`을 끄면 비밀번호는 저장하지 않습니다. 재시작/세션 복구를 위해 refresh token과 최소 세션 식별 정보는 private Home Assistant Store에 저장됩니다. `0.2.1`의 `PERSISTED_COOKIE_ALLOWLIST`는 비어 있으므로 `JSESSIONID`와 `WMONID` 값은 저장하지 않습니다. 저장된 세션이 만료되면 재인증이 필요할 수 있습니다.
 
 이 통합은 Config Entry, Store, 백업을 자체 암호화하지 않습니다. 비밀번호 저장 여부와 관계없이 Home Assistant 호스트, `.storage`, 백업 파일을 비밀 저장소처럼 보호하세요.
 
@@ -54,6 +54,8 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 | 2026년 8월 | 573 kWh |
 
 ### 검침/전기사용량 · 10개
+
+`전기 사용 기간 시작일`, `전기 사용 기간 종료일`, `검침일`은 기기 상세 화면의 **센서 정보** 영역에 표시되고, 나머지 7개 엔티티는 **센서** 영역에 표시됩니다.
 
 | 센서 | 값 예시 |
 | --- | ---: |
@@ -172,7 +174,7 @@ actions:
 ## 문제 해결
 
 - 로그인 실패: 한전ON 웹에서 같은 계정으로 직접 로그인되는지 확인합니다. CAPTCHA, MFA, OACX 등 조건부 챌린지가 나오면 이 통합은 우회하지 않습니다.
-- 세션 만료: 비밀번호 저장을 껐거나 저장된 refresh token/session이 만료되면 재인증이 필요합니다. `0.2.0`은 `JSESSIONID`/`WMONID` 값을 저장하지 않습니다.
+- 세션 만료: 비밀번호 저장을 껐거나 저장된 refresh token/session이 만료되면 재인증이 필요합니다. `0.2.1`은 `JSESSIONID`/`WMONID` 값을 저장하지 않습니다.
 - 고객 없음: 이 통합은 개인 아파트 세대 계약만 지원합니다.
 - 일부 세대만 unavailable: 한 세대의 청구 조회 실패는 다른 세대 센서와 분리됩니다.
 - 월 조회 실패: 응답 액션의 `month`는 `YYYYMM`이고 현재월보다 미래이거나 최근 24개월 범위 밖이면 거절됩니다.
@@ -209,7 +211,7 @@ Home Assistant에서 통합 항목을 삭제하면 이 통합이 소유한 항�
 
 ## 릴리스 체크
 
-릴리스는 `main`의 Tests가 성공하고 같은 커밋의 HACS/Hassfest 검증까지 성공한 경우에만 자동 생성됩니다. 매니페스트 버전 `0.2.0`, Git 태그 `v0.2.0`, GitHub 릴리스 제목과 `kepco_on-v0.2.0.zip` 자산을 일치시킵니다.
+릴리스는 `main`의 Tests가 성공하고 같은 커밋의 HACS/Hassfest 검증까지 성공한 경우에만 자동 생성됩니다. 매니페스트 버전 `0.2.1`, Git 태그 `v0.2.1`, GitHub 릴리스 제목과 `kepco_on-v0.2.1.zip` 자산을 일치시킵니다.
 
 ## 라이선스
 

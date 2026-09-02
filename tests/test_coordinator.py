@@ -14,12 +14,14 @@ from aiohttp import CookieJar
 from custom_components.kepco_on.const import (
     CONF_ACCOUNT_UID_HASH,
     CONF_CUSTOMERS,
+    CONF_DISPLAY_NAME,
     CONF_SAVE_PASSWORD,
     CONF_SELECTED_CUSTOMERS,
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
     CONFIG_ENTRY_VERSION,
     DEFAULT_POLLING_INTERVAL_HOURS,
+    DEFAULT_TITLE,
     OPT_CO2_FACTOR_KG_PER_KWH,
     OPT_ENABLE_CO2_ESTIMATE,
     OPT_ENABLE_DETAILED_SENSORS,
@@ -215,6 +217,7 @@ class FakeConfigEntries:
         self.reloads: list[str] = []
         self.updates: list[dict[str, Any]] = []
         self.version_updates: list[int] = []
+        self.title_updates: list[str] = []
         self.entries_by_id: dict[str, FakeConfigEntry] = {}
         self.forward_result = True
         self.unload_result = True
@@ -228,6 +231,7 @@ class FakeConfigEntries:
         *,
         data: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
+        title: str | None = None,
         version: int | None = None,
         **_: Any,
     ) -> bool:
@@ -236,6 +240,9 @@ class FakeConfigEntries:
             self.updates.append(dict(data))
         if options is not None:
             entry.options = dict(options)
+        if title is not None:
+            entry.title = title
+            self.title_updates.append(title)
         if version is not None:
             entry.version = version
             self.version_updates.append(version)
@@ -287,9 +294,11 @@ class FakeConfigEntry:
         data: Mapping[str, Any],
         options: Mapping[str, Any] | None = None,
         entry_id: str = "entry-1",
+        title: str = DEFAULT_TITLE,
         version: int = CONFIG_ENTRY_VERSION,
     ) -> None:
         self.entry_id = entry_id
+        self.title = title
         self.data = dict(data)
         self.options = dict(options or {})
         self.runtime_data: Any = None
@@ -394,6 +403,8 @@ def make_entry(
     customers: tuple[KepcoCustomer, ...] = (customer("key-1"),),
     selected: list[str] | None = None,
     options: Mapping[str, Any] | None = None,
+    title: str = DEFAULT_TITLE,
+    display_name: str | None = None,
     version: int = CONFIG_ENTRY_VERSION,
 ) -> FakeConfigEntry:
     data: dict[str, Any] = {
@@ -405,9 +416,11 @@ def make_entry(
     }
     if save_password:
         data[CONF_PASSWORD] = PASSWORD_SECRET
+    if display_name is not None:
+        data[CONF_DISPLAY_NAME] = display_name
     if with_handoff:
         data[CONF_SESSION_HANDOFF] = session_to_payload(account_session())
-    return FakeConfigEntry(data=data, options=options, version=version)
+    return FakeConfigEntry(data=data, options=options, title=title, version=version)
 
 
 @pytest.mark.asyncio
@@ -434,7 +447,57 @@ async def test_migrate_v1_removes_legacy_sensor_toggles_and_preserves_options() 
         OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
         OPT_HISTORY_MONTHS: 18,
     }
+    assert entry.title == "101동 1001호"
     assert hass.config_entries.version_updates == [CONFIG_ENTRY_VERSION]
+    assert hass.config_entries.title_updates == ["101동 1001호"]
+
+
+@pytest.mark.asyncio
+async def test_migrate_v2_updates_only_the_default_title_and_normalizes_ho() -> None:
+    from custom_components.kepco_on import async_migrate_entry
+
+    hass = FakeHass()
+    unit = KepcoCustomer(
+        stable_key="key-1",
+        apartment_name="푸른아파트",
+        dong="1402",
+        ho="0406",
+        contract_method="아파트(단일계약)",
+        is_supported=True,
+        _customer_number=RAW_CUSTOMER_SECRET,
+        _house_contract_number=RAW_HOUSE_SECRET,
+    )
+    entry = make_entry(
+        version=2,
+        customers=(unit,),
+        options={OPT_HISTORY_MONTHS: 12},
+    )
+
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", entry)) is True
+
+    assert entry.version == CONFIG_ENTRY_VERSION
+    assert entry.title == "1402동 406호"
+    assert entry.options == {OPT_HISTORY_MONTHS: 12}
+    assert hass.config_entries.title_updates == ["1402동 406호"]
+
+
+@pytest.mark.asyncio
+async def test_migrate_preserves_custom_titles_and_handles_invalid_customer_data() -> None:
+    from custom_components.kepco_on import async_migrate_entry
+
+    hass = FakeHass()
+    manually_named = make_entry(version=2, title="우리집 전기")
+    configured_name = make_entry(version=2, display_name="사용자 지정", title="사용자 지정")
+    invalid = make_entry(version=2)
+    invalid.data[CONF_SELECTED_CUSTOMERS] = ["missing"]
+
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", manually_named)) is True
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", configured_name)) is True
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", invalid)) is True
+
+    assert manually_named.title == "우리집 전기"
+    assert configured_name.title == "사용자 지정"
+    assert invalid.title == DEFAULT_TITLE
 
 
 @pytest.mark.asyncio
@@ -448,6 +511,7 @@ async def test_migrate_current_entry_is_noop_and_unknown_version_is_rejected() -
     assert await async_migrate_entry(cast("Any", hass), cast("Any", current)) is True
     assert await async_migrate_entry(cast("Any", hass), cast("Any", future)) is False
     assert hass.config_entries.version_updates == []
+    assert hass.config_entries.title_updates == []
     assert current.options == {OPT_HISTORY_MONTHS: 12}
 
 

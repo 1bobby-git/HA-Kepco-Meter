@@ -27,6 +27,7 @@ from custom_components.kepco_on.const import (
     DATA_HOUSE_CONTRACT_NUMBER,
     DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DEFAULT_POLLING_INTERVAL_HOURS,
+    DEFAULT_TITLE,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
     OPT_HISTORY_MONTHS,
@@ -42,7 +43,12 @@ from custom_components.kepco_on.exceptions import (
     KepcoOnRateLimitError,
     KepcoOnUnsupportedAccount,
 )
-from custom_components.kepco_on.models import KepcoAccountSession, KepcoCustomer
+from custom_components.kepco_on.models import (
+    KepcoAccountSession,
+    KepcoCustomer,
+    customer_location_label,
+    customer_selection_title,
+)
 from homeassistant.config_entries import (
     ConfigEntryState,
     OptionsFlowManager,
@@ -297,17 +303,35 @@ def account_session(user_id: str = "SERVER_USER") -> KepcoAccountSession:
     )
 
 
-def customer(stable_key: str, *, apartment: str = "푸른아파트") -> KepcoCustomer:
+def customer(
+    stable_key: str,
+    *,
+    apartment: str = "푸른아파트",
+    dong: str = "101",
+    ho: str = "1001",
+) -> KepcoCustomer:
     return KepcoCustomer(
         stable_key=stable_key,
         apartment_name=apartment,
-        dong="101",
-        ho="1001",
+        dong=dong,
+        ho=ho,
         contract_method="아파트(단일계약)",
         is_supported=True,
         _customer_number=RAW_CUSTOMER_SECRET,
         _house_contract_number=RAW_HOUSE_SECRET,
     )
+
+
+def test_customer_titles_normalize_unit_numbers_and_count_multiple_selections() -> None:
+    primary = customer("key-1", dong="1402", ho="0406")
+    text_unit = customer("key-2", dong="A", ho="B-1")
+
+    assert customer_location_label(primary) == "1402동 406호"
+    assert customer_location_label(text_unit) == "A동 B-1호"
+    assert customer_selection_title((primary,)) == "1402동 406호"
+    assert customer_selection_title((primary, text_unit)) == "1402동 406호 외 1세대"
+    with pytest.raises(ValueError, match="At least one"):
+        customer_selection_title(())
 
 
 def make_flow() -> Any:
@@ -424,12 +448,25 @@ async def test_user_success_then_customer_creates_private_entry(
 
 
 @pytest.mark.asyncio
+async def test_default_entry_title_uses_selected_unit_without_leading_zero() -> None:
+    FakeClient.customer_results = [(customer("key-1", dong="1402", ho="0406"),)]
+    flow = make_flow()
+
+    result = await create_entry(flow)
+
+    assert result["type"] == "create_entry"
+    assert result["title"] == "1402동 406호"
+    assert CONF_DISPLAY_NAME not in result["data"]
+
+
+@pytest.mark.asyncio
 async def test_save_password_true_stores_password() -> None:
     flow = make_flow()
 
     await reach_customer_step(flow, **{CONF_SAVE_PASSWORD: True})
     result = await flow.async_step_customer({CONF_SELECTED_CUSTOMERS: ["key-1"]})
 
+    assert result["title"] == "101동 1001호"
     assert result["data"][CONF_PASSWORD] == PASSWORD_SECRET
     redacted = async_redact_data(result["data"], SENSITIVE_CONFIG_DATA_KEYS)
     assert redacted[CONF_PASSWORD] == REDACTED
@@ -466,6 +503,7 @@ async def test_multiple_customers_and_empty_selection_recovery(
 
     result = await flow.async_step_customer({CONF_SELECTED_CUSTOMERS: ["key-1", "key-2"]})
     assert result["type"] == "create_entry"
+    assert result["title"] == "101동 1001호 외 1세대"
     assert result["data"][CONF_SELECTED_CUSTOMERS] == ["key-1", "key-2"]
     assert patched_flow_dependencies[0].closed is True
 
@@ -770,7 +808,7 @@ def make_entry() -> FakeConfigEntry:
 def test_config_flow_uses_current_entry_version() -> None:
     from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
 
-    assert KepcoOnConfigFlow.VERSION == CONFIG_ENTRY_VERSION == 2
+    assert KepcoOnConfigFlow.VERSION == CONFIG_ENTRY_VERSION == 3
 
 
 @pytest.mark.asyncio
@@ -1068,8 +1106,37 @@ async def test_reconfigure_updates_customer_selection_only() -> None:
     assert result["type"] == "abort"
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
+    assert entry.title == "102동 1002호"
     assert entry.unique_id == account_hash("SERVER_USER")
     assert fake_hass.config_entries.reloads == [entry.entry_id]
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_preserves_user_renamed_entry_title() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    entry.title = "우리집 전기"
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.handler = DOMAIN
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-2"]})
+
+    assert result["type"] == "abort"
+    assert entry.title == "우리집 전기"
+
+
+def test_automatic_title_falls_back_safely_for_invalid_stored_selection() -> None:
+    from custom_components.kepco_on.config_flow import _automatic_entry_title
+
+    entry = make_entry()
+    entry.data[CONF_SELECTED_CUSTOMERS] = ["missing"]
+
+    assert _automatic_entry_title(cast("Any", entry)) == DEFAULT_TITLE
 
 
 @pytest.mark.asyncio

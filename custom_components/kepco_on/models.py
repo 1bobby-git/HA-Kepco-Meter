@@ -79,6 +79,33 @@ class KepcoCustomer:
         return self._house_contract_number
 
 
+def _normalized_location_part(value: str) -> str:
+    """Return a display-only dong/ho value without numeric leading zeroes."""
+    stripped = value.strip()
+    try:
+        return str(int(stripped))
+    except ValueError:
+        return stripped
+
+
+def customer_location_label(customer: KepcoCustomer) -> str:
+    """Return the privacy-safe apartment unit label used as the entry title."""
+    return (
+        f"{_normalized_location_part(customer.dong)}동 "
+        f"{_normalized_location_part(customer.ho)}호"
+    )
+
+
+def customer_selection_title(customers: Sequence[KepcoCustomer]) -> str:
+    """Return a concise config-entry title for one or more selected units."""
+    if not customers:
+        raise ValueError("At least one KEPCO ON customer is required for the title")
+    first = customer_location_label(customers[0])
+    if len(customers) == 1:
+        return first
+    return f"{first} 외 {len(customers) - 1}세대"
+
+
 @dataclass(frozen=True, slots=True)
 class KepcoUsageHistoryPoint:
     """One monthly usage/amount history point."""
@@ -264,6 +291,8 @@ __all__ = [
     "KepcoCustomer",
     "KepcoCustomerUpdateResult",
     "KepcoUsageHistoryPoint",
+    "customer_location_label",
+    "customer_selection_title",
     "deserialize_customer",
     "selected_customers",
     "serialize_customer",
