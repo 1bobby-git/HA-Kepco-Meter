@@ -104,11 +104,27 @@ jobs:
           rm -rf "${ICON_TMP}"
           git diff --check
 
-      - name: Run basic regression checks
+      - name: Verify release metadata
         shell: bash
         run: |
           set -euo pipefail
-          python -m compileall -q custom_components/kepco_on tests/test_ci_metadata.py
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import re
+          import struct
+
+          manifest = json.loads(Path("custom_components/kepco_on/manifest.json").read_text(encoding="utf-8"))
+          if manifest.get("version") != "0.2.3":
+              raise SystemExit("Manifest version was not updated")
+          pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+          if not re.search(r'^version = "0\.2\.3"$', pyproject, re.MULTILINE):
+              raise SystemExit("pyproject version was not updated")
+          for name, expected in (("icon.png", 256), ("icon@2x.png", 512)):
+              data = Path("custom_components/kepco_on/brand", name).read_bytes()
+              if struct.unpack(">II", data[16:24]) != (expected, expected):
+                  raise SystemExit(f"Invalid committed dimensions: {name}")
+          PY
 
       - name: Commit and push
         shell: bash
