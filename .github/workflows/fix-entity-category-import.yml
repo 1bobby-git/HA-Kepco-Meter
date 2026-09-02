@@ -1,0 +1,53 @@
+name: Fix EntityCategory import
+
+on:
+  push:
+    branches:
+      - fix/clean-device-names
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: fix/clean-device-names
+      - name: Fix imports and remove this workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          for relative in (
+              "custom_components/kepco_on/sensor.py",
+              "tests/test_sensor.py",
+          ):
+              path = Path(relative)
+              source = path.read_text(encoding="utf-8")
+              source = source.replace(
+                  "from homeassistant.const import UnitOfEnergy\n",
+                  "from homeassistant.const import EntityCategory, UnitOfEnergy\n",
+              )
+              source = source.replace(
+                  "from homeassistant.helpers.entity import EntityCategory\n",
+                  "",
+              )
+              path.write_text(source, encoding="utf-8")
+          PY
+          rm .github/workflows/fix-entity-category-import.yml
+      - name: Commit changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git diff --cached --check
+          git commit -m 'fix: import EntityCategory from Home Assistant constants'
+          git push origin HEAD:fix/clean-device-names
