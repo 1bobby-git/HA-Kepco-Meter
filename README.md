@@ -1,3 +1,14 @@
+<!-- project-branding:start -->
+<p align="center">
+  <img src="https://raw.githubusercontent.com/1bobby-git/brands/master/custom_integrations/kepco_on/logo.png" alt="한전ON 로고" width="240">
+</p>
+<p align="center">
+  <a href="https://github.com/1bobby-git/HA-Kepco-Meter/stargazers">
+    <img src="https://img.shields.io/github/stars/1bobby-git/HA-Kepco-Meter?style=flat-square&logo=github&label=Stars" alt="GitHub Stars">
+  </a>
+</p>
+<!-- project-branding:end -->
+
 # 한전ON Home Assistant 커스텀 통합
 
 한전ON 개인(`INDI`) 계정의 아파트 세대 전기요금 조회를 Home Assistant 센서와 응답 액션으로 가져오는 비공식 커스텀 통합입니다. 실시간 스마트미터가 아니라 한전ON 청구/검침 페이지에서 확인되는 월별 요금 데이터 기반입니다.
