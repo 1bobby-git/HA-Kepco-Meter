@@ -306,14 +306,17 @@ def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     assert package["devDependencies"] == {"playwright": "1.62.1"}
 
 
-def test_hacs_brand_icon_is_square_rgba_png() -> None:
+def test_hacs_brand_icon_is_square_transparent_png() -> None:
     icon = ROOT / "custom_components" / "kepco_on" / "brand" / "icon.png"
     data = icon.read_bytes()
 
     assert data.startswith(b"\x89PNG\r\n\x1a\n")
     assert data[12:16] == b"IHDR"
     assert struct.unpack(">II", data[16:24]) == (256, 256)
-    assert data[25] == 6  # PNG color type 6: truecolor with alpha
+    color_type = data[25]
+    assert color_type in {3, 6}  # indexed or truecolor with alpha
+    if color_type == 3:
+        assert b"tRNS" in data
 
 
 def test_test_requirements_include_yaml_parser_for_local_workflow_validation() -> None:
