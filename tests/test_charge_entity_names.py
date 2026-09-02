@@ -37,13 +37,9 @@ def test_korean_charge_entity_names_remain_complete_on_device_page() -> None:
     translations = cast(
         "dict[str, Any]",
         json.loads(
-            (
-                ROOT
-                / "custom_components"
-                / "kepco_on"
-                / "translations"
-                / "ko.json"
-            ).read_text(encoding="utf-8")
+            (ROOT / "custom_components" / "kepco_on" / "translations" / "ko.json").read_text(
+                encoding="utf-8"
+            )
         ),
     )
     sensors = cast(
