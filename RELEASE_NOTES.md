@@ -26,4 +26,4 @@
 - 더 이상 사용하지 않는 `청구월` 단독 엔티티와 상세/CO₂ 생성 토글 옵션은 마이그레이션 과정에서 정리합니다.
 - 업데이트 후 Home Assistant Core를 완전히 재시작해야 합니다.
 
-최소 Home Assistant 버전은 2026.8.3입니다.
+최소 Home Assistant 버전은 2026.8.3이며, 릴리스 전 Tests·HACS·Hassfest 검증을 모두 통과해야 자동 발행됩니다.
