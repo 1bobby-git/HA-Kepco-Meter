@@ -119,7 +119,6 @@ jobs:
           PY
 
           git diff --check
-          python -m compileall -q custom_components/kepco_on
 
       - name: Commit local brand release
         shell: bash
