@@ -106,9 +106,7 @@ def _customer_label(customer: KepcoCustomer) -> str:
     return f"{customer.apartment_name} {customer_location_name(customer)}"
 
 
-def _config_entry_title(
-    entry_data: Mapping[str, Any], customers: Sequence[KepcoCustomer]
-) -> str:
+def _config_entry_title(entry_data: Mapping[str, Any], customers: Sequence[KepcoCustomer]) -> str:
     """Return an explicit display name or the normalized selected location."""
     display_name = entry_data.get(CONF_DISPLAY_NAME)
     if isinstance(display_name, str) and (normalized := display_name.strip()):
