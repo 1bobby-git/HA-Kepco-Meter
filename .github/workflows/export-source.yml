@@ -26,9 +26,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          cat .github/five-sensor-update.patch.b64.part-* | base64 --decode > /tmp/five-sensor-update.patch
+          cat .github/five-sensor-update.patch.gz.b64.part-* | base64 --decode | gzip --decompress > /tmp/five-sensor-update.patch
           git apply --index /tmp/five-sensor-update.patch
-          rm .github/five-sensor-update.patch.b64.part-*
+          rm .github/five-sensor-update.patch.gz.b64.part-*
           rm .github/five-sensor-update.ready
           rm .github/workflows/export-source.yml
           git add -A
