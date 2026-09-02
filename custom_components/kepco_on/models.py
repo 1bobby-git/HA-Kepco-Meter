@@ -91,8 +91,7 @@ def _normalized_location_part(value: str) -> str:
 def customer_location_label(customer: KepcoCustomer) -> str:
     """Return the privacy-safe apartment unit label used as the entry title."""
     return (
-        f"{_normalized_location_part(customer.dong)}동 "
-        f"{_normalized_location_part(customer.ho)}호"
+        f"{_normalized_location_part(customer.dong)}동 {_normalized_location_part(customer.ho)}호"
     )
 
 
