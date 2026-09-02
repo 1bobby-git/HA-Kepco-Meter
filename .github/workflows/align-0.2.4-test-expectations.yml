@@ -1,0 +1,73 @@
+name: Align KEPCO ON 0.2.4 test expectations
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/align-0.2.4-test-expectations.yml
+
+permissions:
+  contents: write
+
+concurrency:
+  group: align-kepco-on-0.2.4-test-expectations
+  cancel-in-progress: false
+
+jobs:
+  align:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out latest main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Prepare latest branch state
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git checkout -B version-test-alignment origin/main
+
+      - name: Update version-bound test expectations
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          expected_counts = {
+              Path("tests/test_api.py"): 2,
+              Path("tests/test_auth.py"): 1,
+              Path("tests/test_diagnostics.py"): 1,
+          }
+          old = "0.2.2"
+          new = "0.2.4"
+
+          for path, expected_count in expected_counts.items():
+              text = path.read_text(encoding="utf-8")
+              actual_count = text.count(old)
+              if actual_count != expected_count:
+                  raise SystemExit(
+                      f"Unexpected {old} count in {path}: {actual_count}, expected {expected_count}"
+                  )
+              path.write_text(text.replace(old, new), encoding="utf-8")
+
+          for path in expected_counts:
+              if old in path.read_text(encoding="utf-8"):
+                  raise SystemExit(f"Stale version remains in {path}")
+          PY
+          git diff --check
+
+      - name: Commit aligned tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/align-0.2.4-test-expectations.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Align KEPCO ON tests with 0.2.4"
+          git push origin HEAD:main
