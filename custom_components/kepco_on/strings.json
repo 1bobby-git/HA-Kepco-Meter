@@ -67,20 +67,16 @@
     "step": {
       "init": {
         "title": "KEPCO ON options",
-        "description": "Adjust polling, sensors, CO2 estimate, and history settings.",
+        "description": "Adjust polling, CO2 conversion factor, and history response settings.",
         "data": {
           "polling_interval_hours": "Polling interval",
-          "enable_detailed_sensors": "Enable detailed sensors",
-          "enable_co2_estimate": "Enable CO2 estimate",
           "co2_factor_kg_per_kwh": "CO2 factor (kg/kWh)",
           "history_months": "History months"
         },
         "data_description": {
           "polling_interval_hours": "Hours between KEPCO ON updates.",
-          "enable_detailed_sensors": "Create additional diagnostic sensors.",
-          "enable_co2_estimate": "Estimate CO2 emissions from electricity use.",
-          "co2_factor_kg_per_kwh": "Positive decimal factor up to 10.",
-          "history_months": "Number of months of history to request."
+          "co2_factor_kg_per_kwh": "Positive decimal factor up to 10 used for all three emission sensors.",
+          "history_months": "Number of months returned by the usage-history action."
         }
       }
     },
@@ -167,14 +163,32 @@
   },
   "entity": {
     "sensor": {
-      "monthly_usage": {
-        "name": "Monthly usage"
+      "monthly_usage_period": {
+        "name": "{year}-{month}"
+      },
+      "usage_period_start": {
+        "name": "Electricity usage period start"
+      },
+      "usage_period_end": {
+        "name": "Electricity usage period end"
+      },
+      "meter_reading_day": {
+        "name": "Meter reading day"
       },
       "meter_reading": {
-        "name": "Meter reading"
+        "name": "Current meter reading"
       },
-      "amount_due": {
-        "name": "Amount due"
+      "previous_meter_reading": {
+        "name": "Previous meter reading"
+      },
+      "monthly_usage": {
+        "name": "Current month usage"
+      },
+      "household_usage": {
+        "name": "Current household usage"
+      },
+      "common_usage": {
+        "name": "Current common-area usage"
       },
       "previous_month_usage": {
         "name": "Previous month usage"
@@ -182,44 +196,23 @@
       "last_year_same_month_usage": {
         "name": "Last year same month usage"
       },
-      "building_average_usage": {
-        "name": "Building average usage"
-      },
-      "apartment_average_usage": {
-        "name": "Apartment average usage"
-      },
-      "previous_meter_reading": {
-        "name": "Previous meter reading"
-      },
-      "billing_month": {
-        "name": "Billing month"
-      },
-      "usage_period_start": {
-        "name": "Usage period start"
-      },
-      "usage_period_end": {
-        "name": "Usage period end"
-      },
-      "meter_reading_day": {
-        "name": "Meter reading day"
-      },
       "electricity_subtotal": {
-        "name": "Electricity subtotal"
+        "name": "Electricity charge total"
       },
       "base_charge": {
-        "name": "Base charge"
+        "name": "Electricity charge detail - base charge"
       },
       "energy_charge": {
-        "name": "Energy charge"
+        "name": "Electricity charge detail - energy charge"
       },
       "climate_environment_charge": {
-        "name": "Climate environment charge"
+        "name": "Electricity charge detail - climate and environment charge"
       },
       "fuel_adjustment_charge": {
-        "name": "Fuel adjustment charge"
+        "name": "Electricity charge detail - fuel adjustment charge"
       },
       "child_discount": {
-        "name": "Child discount"
+        "name": "Electricity charge detail - childbirth household discount"
       },
       "vat": {
         "name": "VAT"
@@ -228,13 +221,28 @@
         "name": "Power industry fund"
       },
       "rounding_amount": {
-        "name": "Rounding amount"
+        "name": "Won-unit truncation amount"
       },
-      "co2_estimate": {
-        "name": "Estimated CO2 emissions"
+      "amount_due": {
+        "name": "Amount due"
       },
-      "neighbor_usage_comparison": {
-        "name": "Neighbor electricity usage comparison"
+      "customer_usage": {
+        "name": "Customer"
+      },
+      "same_building_usage": {
+        "name": "Building"
+      },
+      "apartment_total_usage": {
+        "name": "Entire apartment"
+      },
+      "current_month_co2": {
+        "name": "Current month emissions"
+      },
+      "previous_month_co2": {
+        "name": "Previous month emissions"
+      },
+      "last_year_same_month_co2": {
+        "name": "Last year same month emissions"
       }
     }
   }

@@ -112,6 +112,8 @@ class KepcoBill:
     period_start: date | None = None
     period_end: date | None = None
     usage_kwh: int | None = None
+    household_usage_kwh: int | None = None
+    common_usage_kwh: int | None = None
     previous_usage_kwh: int | None = None
     last_year_usage_kwh: int | None = None
     building_average_kwh: int | None = None
