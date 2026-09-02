@@ -1,0 +1,49 @@
+name: Fix prepared source lint
+
+on:
+  push:
+    branches:
+      - feature/five-sensor-devices
+    paths:
+      - .github/fix-lint.ready
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    name: Apply Ruff lint fixes
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # source: actions/checkout@v7
+        with:
+          ref: feature/five-sensor-devices
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # source: actions/setup-python@v7
+        with:
+          python-version: "3.14.4"
+
+      - name: Fix lint and push source files
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install ruff==0.16.5
+          python -m ruff check --fix \
+            custom_components/kepco_on/const.py \
+            tests/test_config_flow.py
+          python -m ruff format \
+            custom_components/kepco_on/const.py \
+            tests/test_config_flow.py
+          rm .github/fix-lint.ready
+          git add custom_components/kepco_on/const.py \
+            tests/test_config_flow.py \
+            .github/fix-lint.ready
+          git diff --cached --check
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "style: fix grouped sensor lint"
+          git push origin HEAD:feature/five-sensor-devices
