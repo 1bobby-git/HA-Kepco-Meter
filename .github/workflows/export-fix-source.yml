@@ -1,0 +1,26 @@
+name: Export fix source
+
+on:
+  push:
+    branches:
+      - fix/naming-and-sensor-info
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # source: actions/checkout@v7
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # source: actions/upload-artifact@v4
+        with:
+          name: ha-kepco-meter-fix-source
+          path: |
+            .
+            !.git
+          include-hidden-files: true
+          retention-days: 1
