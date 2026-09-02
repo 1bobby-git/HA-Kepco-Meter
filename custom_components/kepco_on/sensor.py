@@ -598,8 +598,8 @@ async def _async_remove_stale_registry_entries(
 
     device_registry = dr.async_get(hass)
     for device_entry in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
-        customer_key = _customer_key_from_device_identifiers(device_entry.identifiers)
-        if customer_key is None or customer_key in selected_keys:
+        device_customer_key = _customer_key_from_device_identifiers(device_entry.identifiers)
+        if device_customer_key is None or device_customer_key in selected_keys:
             continue
         if set(device_entry.config_entries) == {entry.entry_id}:
             device_registry.async_remove_device(device_entry.id)
