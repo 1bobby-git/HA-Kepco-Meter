@@ -15,7 +15,7 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from homeassistant.const import UnitOfEnergy
+from homeassistant.const import EntityCategory, UnitOfEnergy
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -226,6 +226,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         key="usage_period_start",
         translation_key="usage_period_start",
         device_group=KepcoDeviceGroup.METER_USAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         device_class=SensorDeviceClass.DATE,
         value_fn=_usage("period_start"),
     ),
@@ -233,6 +234,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         key="usage_period_end",
         translation_key="usage_period_end",
         device_group=KepcoDeviceGroup.METER_USAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         device_class=SensorDeviceClass.DATE,
         value_fn=_usage("period_end"),
     ),
@@ -240,6 +242,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         key="meter_reading_day",
         translation_key="meter_reading_day",
         device_group=KepcoDeviceGroup.METER_USAGE,
+        entity_category=EntityCategory.DIAGNOSTIC,
         value_fn=_usage("meter_reading_day"),
     ),
     KepcoSensorEntityDescription(
@@ -461,9 +464,9 @@ def _device_info(customer: KepcoCustomer, group: KepcoDeviceGroup) -> DeviceInfo
     group_name = _DEVICE_GROUP_NAMES[group]
     return {
         "identifiers": {(DOMAIN, _device_identifier(customer, group))},
-        "name": f"한전ON {group_name} {customer.dong}동 {customer.ho}호",
+        "name": group_name,
         "manufacturer": "한국전력공사(KEPCO)",
-        "model": f"한전ON {group_name}",
+        "model": "한전ON",
         "configuration_url": PAGE_URL,
     }
 

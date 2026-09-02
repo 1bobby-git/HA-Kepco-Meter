@@ -68,7 +68,7 @@ hacs validate
 hassfest
 ```
 
-For `v0.2.0`, the GitHub `Release` workflow waits for both the Tests workflow and the same-commit HACS/Hassfest validation before creating the tag, release, and HACS ZIP asset.
+For `v0.2.1`, the GitHub `Release` workflow waits for both the Tests workflow and the same-commit HACS/Hassfest validation before creating the tag, release, and HACS ZIP asset.
 
 ## Dated Live Results
 
@@ -98,7 +98,7 @@ Validated on HAOS 2026.8.3 on 2026-09-01:
 
 The live result record must not include usernames, raw customer or contract numbers, derived stable keys, addresses, bill values, tokens, cookies, or passwords.
 
-The `v0.2.0` five-device/32-entity redesign is validated by repository unit, type, formatting, HACS, and Hassfest gates before publication. This file does not claim a target-HAOS live upgrade result until that separate deployment is run.
+The `v0.2.1` five-device/32-entity naming and sensor-information update is validated by repository unit, type, formatting, HACS, and Hassfest gates before publication. This file does not claim a target-HAOS live upgrade result until that separate deployment is run.
 
 
 ## Home Assistant Live Smoke Checklist

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -50,6 +50,8 @@ from .exceptions import (
 from .models import (
     KepcoAccountSession,
     KepcoCustomer,
+    customer_location_name,
+    selected_customer_location_title,
     selected_customers,
     serialize_customer,
     stored_customers,
@@ -57,7 +59,6 @@ from .models import (
 )
 from .session_store import session_to_payload
 
-DEFAULT_TITLE = "한전ON"
 DEFAULT_HISTORY_MONTHS = 12
 MIN_CO2_FACTOR = 0.001
 
@@ -102,7 +103,15 @@ def _account_uid_hash(user_id: str) -> str:
 
 
 def _customer_label(customer: KepcoCustomer) -> str:
-    return f"{customer.apartment_name} {customer.dong}동 {customer.ho}호"
+    return f"{customer.apartment_name} {customer_location_name(customer)}"
+
+
+def _config_entry_title(entry_data: Mapping[str, Any], customers: Sequence[KepcoCustomer]) -> str:
+    """Return an explicit display name or the normalized selected location."""
+    display_name = entry_data.get(CONF_DISPLAY_NAME)
+    if isinstance(display_name, str) and (normalized := display_name.strip()):
+        return normalized
+    return selected_customer_location_title(customers)
 
 
 def _customer_options(customers: tuple[KepcoCustomer, ...]) -> list[selector.SelectOptionDict]:
@@ -313,14 +322,12 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         pending = self._pending
+        selected_records = selected_customers(pending.customers, selected)
         data: dict[str, Any] = {
             CONF_USERNAME: pending.username,
             CONF_SAVE_PASSWORD: pending.save_password,
             CONF_ACCOUNT_UID_HASH: pending.account_uid_hash,
-            CONF_CUSTOMERS: [
-                serialize_customer(customer)
-                for customer in selected_customers(pending.customers, selected)
-            ],
+            CONF_CUSTOMERS: [serialize_customer(customer) for customer in selected_records],
             CONF_SELECTED_CUSTOMERS: selected,
             CONF_SESSION_HANDOFF: session_to_payload(pending.session),
         }
@@ -328,7 +335,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data[CONF_DISPLAY_NAME] = pending.display_name
         if pending.save_password:
             data[CONF_PASSWORD] = pending.password
-        title = pending.display_name or DEFAULT_TITLE
+        title = _config_entry_title(data, selected_records)
         await _close_session(pending.client_session)
         self._pending = None
         return self.async_create_entry(title=title, data=data)
@@ -407,11 +414,10 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         preserved = [key for key in current if key in new_keys]
         if not preserved and customers:
             preserved = [customers[0].stable_key]
+        selected_records = selected_customers(customers, preserved)
         data = dict(entry.data)
         data[CONF_ACCOUNT_UID_HASH] = account_uid_hash
-        data[CONF_CUSTOMERS] = [
-            serialize_customer(customer) for customer in selected_customers(customers, preserved)
-        ]
+        data[CONF_CUSTOMERS] = [serialize_customer(customer) for customer in selected_records]
         data[CONF_SELECTED_CUSTOMERS] = preserved
         data[CONF_SESSION_HANDOFF] = session_to_payload(session)
         if data.get(CONF_SAVE_PASSWORD):
@@ -421,6 +427,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await _close_session(client_session)
         return self.async_update_reload_and_abort(
             entry,
+            title=_config_entry_title(data, selected_records),
             data=data,
             reason="reauth_successful",
         )
@@ -456,13 +463,13 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=_customer_schema(customers, current),
                 errors={"base": "invalid_selection"},
             )
+        selected_records = selected_customers(customers, selected)
         data = dict(entry.data)
-        data[CONF_CUSTOMERS] = [
-            serialize_customer(customer) for customer in selected_customers(customers, selected)
-        ]
+        data[CONF_CUSTOMERS] = [serialize_customer(customer) for customer in selected_records]
         data[CONF_SELECTED_CUSTOMERS] = selected
         return self.async_update_reload_and_abort(
             entry,
+            title=_config_entry_title(data, selected_records),
             data=data,
             reason="reconfigure_successful",
         )

@@ -14,6 +14,7 @@ from aiohttp import CookieJar
 from custom_components.kepco_on.const import (
     CONF_ACCOUNT_UID_HASH,
     CONF_CUSTOMERS,
+    CONF_DISPLAY_NAME,
     CONF_SAVE_PASSWORD,
     CONF_SELECTED_CUSTOMERS,
     CONF_SESSION_HANDOFF,
@@ -228,6 +229,7 @@ class FakeConfigEntries:
         *,
         data: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
+        title: str | None = None,
         version: int | None = None,
         **_: Any,
     ) -> bool:
@@ -236,6 +238,8 @@ class FakeConfigEntries:
             self.updates.append(dict(data))
         if options is not None:
             entry.options = dict(options)
+        if title is not None:
+            entry.title = title
         if version is not None:
             entry.version = version
             self.version_updates.append(version)
@@ -287,9 +291,11 @@ class FakeConfigEntry:
         data: Mapping[str, Any],
         options: Mapping[str, Any] | None = None,
         entry_id: str = "entry-1",
+        title: str = "한전ON",
         version: int = CONFIG_ENTRY_VERSION,
     ) -> None:
         self.entry_id = entry_id
+        self.title = title
         self.data = dict(data)
         self.options = dict(options or {})
         self.runtime_data: Any = None
@@ -435,6 +441,25 @@ async def test_migrate_v1_removes_legacy_sensor_toggles_and_preserves_options() 
         OPT_HISTORY_MONTHS: 18,
     }
     assert hass.config_entries.version_updates == [CONFIG_ENTRY_VERSION]
+    assert entry.title == "101동 1001호"
+
+
+@pytest.mark.asyncio
+async def test_migrate_v2_updates_location_title_and_preserves_explicit_display_name() -> None:
+    from custom_components.kepco_on import async_migrate_entry
+
+    hass = FakeHass()
+    location_entry = make_entry(version=2)
+    explicit_entry = make_entry(version=2)
+    explicit_entry.data[CONF_DISPLAY_NAME] = "우리 집 전기"
+
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", location_entry)) is True
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", explicit_entry)) is True
+
+    assert location_entry.title == "101동 1001호"
+    assert explicit_entry.title == "우리 집 전기"
+    assert location_entry.version == CONFIG_ENTRY_VERSION
+    assert explicit_entry.version == CONFIG_ENTRY_VERSION
 
 
 @pytest.mark.asyncio
