@@ -25,6 +25,7 @@ from custom_components.kepco_on.models import (
 )
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfEnergy
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -304,37 +305,37 @@ async def test_sensors_have_exact_five_device_groups_counts_values_and_privacy()
     assert device_info_by_group == {
         KepcoDeviceGroup.MONTHLY_USAGE: {
             "identifiers": {(DOMAIN, "cust-a:monthly_usage")},
-            "name": "한전ON 월별 사용량 101동 1001호",
+            "name": "월별 사용량",
             "manufacturer": "한국전력공사(KEPCO)",
-            "model": "한전ON 월별 사용량",
+            "model": "한전ON",
             "configuration_url": PAGE_URL,
         },
         KepcoDeviceGroup.METER_USAGE: {
             "identifiers": {(DOMAIN, "cust-a")},
-            "name": "한전ON 검침/전기사용량 101동 1001호",
+            "name": "검침/전기사용량",
             "manufacturer": "한국전력공사(KEPCO)",
-            "model": "한전ON 검침/전기사용량",
+            "model": "한전ON",
             "configuration_url": PAGE_URL,
         },
         KepcoDeviceGroup.ELECTRICITY_CHARGE: {
             "identifiers": {(DOMAIN, "cust-a:electricity_charge")},
-            "name": "한전ON 전기요금 101동 1001호",
+            "name": "전기요금",
             "manufacturer": "한국전력공사(KEPCO)",
-            "model": "한전ON 전기요금",
+            "model": "한전ON",
             "configuration_url": PAGE_URL,
         },
         KepcoDeviceGroup.NEIGHBOR_COMPARISON: {
             "identifiers": {(DOMAIN, "cust-a:neighbor_comparison")},
-            "name": "한전ON 이웃 전기사용량 비교 101동 1001호",
+            "name": "이웃 전기사용량 비교",
             "manufacturer": "한국전력공사(KEPCO)",
-            "model": "한전ON 이웃 전기사용량 비교",
+            "model": "한전ON",
             "configuration_url": PAGE_URL,
         },
         KepcoDeviceGroup.GREENHOUSE_GAS: {
             "identifiers": {(DOMAIN, "cust-a:greenhouse_gas")},
-            "name": "한전ON 온실가스 배출량 101동 1001호",
+            "name": "온실가스 배출량",
             "manufacturer": "한국전력공사(KEPCO)",
-            "model": "한전ON 온실가스 배출량",
+            "model": "한전ON",
             "configuration_url": PAGE_URL,
         },
     }
@@ -347,6 +348,22 @@ async def test_sensors_have_exact_five_device_groups_counts_values_and_privacy()
         assert RAW_CUSTOMER_SECRET not in rendered
         assert RAW_HOUSE_SECRET not in rendered
         assert RAW_NAME_SECRET not in rendered
+
+    diagnostic_keys = {
+        "usage_period_start",
+        "usage_period_end",
+        "meter_reading_day",
+    }
+    assert {
+        entity.entity_description.key
+        for entity in entities
+        if entity.entity_description.entity_category is EntityCategory.DIAGNOSTIC
+    } == diagnostic_keys
+    assert all(
+        entity.entity_description.entity_category is None
+        for entity in entities
+        if entity.entity_description.key not in diagnostic_keys
+    )
 
     history_values = {
         "usage_history_last_year_two_months_ago": (399, {"year": "2025", "month": "6"}),
@@ -623,15 +640,16 @@ async def test_multiple_customer_device_names_are_distinct_and_privacy_safe() ->
         customers=customers,
         bills_by_customer_key={"cust-a": bill(), "cust-b": bill()},
     )
-    meter_device_names = {
-        entity.device_info["name"]
+    meter_devices = [
+        entity.device_info
         for entity in entities
         if entity.entity_description.key == "monthly_usage"
-    }
+    ]
 
-    assert meter_device_names == {
-        "한전ON 검침/전기사용량 101동 1001호",
-        "한전ON 검침/전기사용량 202동 0304호",
+    assert {device["name"] for device in meter_devices} == {"검침/전기사용량"}
+    assert {next(iter(device["identifiers"])) for device in meter_devices} == {
+        (DOMAIN, "cust-a"),
+        (DOMAIN, "cust-b"),
     }
     rendered = repr([entity.device_info for entity in entities])
     assert RAW_CUSTOMER_SECRET not in rendered
