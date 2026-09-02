@@ -24,8 +24,7 @@ from custom_components.kepco_on.models import (
     KepcoUsageHistoryPoint,
 )
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
-from homeassistant.const import UnitOfEnergy
-from homeassistant.helpers.entity import EntityCategory
+from homeassistant.const import EntityCategory, UnitOfEnergy
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
 ROOT = Path(__file__).resolve().parents[1]
