@@ -157,7 +157,7 @@ def _co2_estimate(field: str) -> KepcoValueFunction:
             if decimal_factor <= 0:
                 return None
             estimate = Decimal(usage) * decimal_factor
-        except (InvalidOperation, ValueError):
+        except InvalidOperation, ValueError:
             return None
         return round(estimate)
 
@@ -444,7 +444,9 @@ SENSOR_DESCRIPTIONS = (
 )
 ACTIVE_SENSOR_KEYS = frozenset(description.key for description in SENSOR_DESCRIPTIONS)
 REMOVED_SENSOR_KEYS = frozenset({"billing_month"})
-KNOWN_SENSOR_KEYS = tuple(sorted((*ACTIVE_SENSOR_KEYS, *REMOVED_SENSOR_KEYS), key=len, reverse=True))
+KNOWN_SENSOR_KEYS = tuple(
+    sorted((*ACTIVE_SENSOR_KEYS, *REMOVED_SENSOR_KEYS), key=len, reverse=True)
+)
 
 
 def _device_identifier(customer: KepcoCustomer, group: KepcoDeviceGroup) -> str:
@@ -558,7 +560,9 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         if bill is None:
             return {}
         offset = self.entity_description.history_month_offset
-        billing_month = _shift_month(bill.bill_month, offset) if offset is not None else bill.bill_month
+        billing_month = (
+            _shift_month(bill.bill_month, offset) if offset is not None else bill.bill_month
+        )
         attributes: KepcoSensorAttributes = {"billing_month": billing_month}
         if offset is None:
             if bill.period_start is not None:
@@ -615,9 +619,7 @@ def _is_this_entry_domain_entity(registry_entry: RegistryEntry, entry_id: str) -
 
 def _customer_key_from_device_identifiers(identifiers: Iterable[tuple[str, ...]]) -> str | None:
     group_suffixes = tuple(
-        f":{group.value}"
-        for group in KepcoDeviceGroup
-        if group is not KepcoDeviceGroup.METER_USAGE
+        f":{group.value}" for group in KepcoDeviceGroup if group is not KepcoDeviceGroup.METER_USAGE
     )
     for identifier_tuple in identifiers:
         if len(identifier_tuple) != 2:

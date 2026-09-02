@@ -547,9 +547,7 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
                 ),
                 vol.Required(
                     OPT_CO2_FACTOR_KG_PER_KWH,
-                    default=options.get(
-                        OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH
-                    ),
+                    default=options.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=MIN_CO2_FACTOR,
@@ -587,11 +585,7 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
         try:
             co2_factor = float(
                 Decimal(
-                    str(
-                        user_input.get(
-                            OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH
-                        )
-                    )
+                    str(user_input.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH))
                 )
             )
         except InvalidOperation, ValueError:
