@@ -68,7 +68,7 @@ hacs validate
 hassfest
 ```
 
-Record the exact tool version and output when these release gates are run for `v0.1.1`.
+For `v0.2.0`, the GitHub `Release` workflow waits for both the Tests workflow and the same-commit HACS/Hassfest validation before creating the tag, release, and HACS ZIP asset.
 
 ## Dated Live Results
 
@@ -98,6 +98,9 @@ Validated on HAOS 2026.8.3 on 2026-09-01:
 
 The live result record must not include usernames, raw customer or contract numbers, derived stable keys, addresses, bill values, tokens, cookies, or passwords.
 
+The `v0.2.0` five-device/32-entity redesign is validated by repository unit, type, formatting, HACS, and Hassfest gates before publication. This file does not claim a target-HAOS live upgrade result until that separate deployment is run.
+
+
 ## Home Assistant Live Smoke Checklist
 
 Run on the target HAOS instance only after confirming its current version, config directory, and backup state:
@@ -108,9 +111,10 @@ Run on the target HAOS instance only after confirming its current version, confi
 - Add KEPCO ON through the UI.
 - Confirm login succeeds without unsupported conditional challenges.
 - Select one or more supported apartment customers.
-- Confirm default sensors load and contain no raw customer IDs in entity IDs or attributes.
-- Confirm detailed sensors respect the option registry behavior.
-- Confirm CO2 appears only when enabled and is labeled as an estimate.
+- Confirm five logical devices and 32 sensor entities load for each selected customer.
+- Confirm six monthly-history entities show the expected current and prior-year month labels.
+- Confirm integration-disabled legacy detailed entities are re-enabled while user-disabled entities stay disabled.
+- Confirm all three CO2 entities are labeled as estimates and use the configured factor.
 - Run `kepco_on.get_monthly_bill` with response data.
 - Run `kepco_on.get_usage_history` with response data.
 - Unload/reload the entry.

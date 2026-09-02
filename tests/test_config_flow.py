@@ -24,11 +24,11 @@ from custom_components.kepco_on.const import (
     CONF_USERNAME,
     DATA_CUSTOMER_NUMBER,
     DATA_HOUSE_CONTRACT_NUMBER,
+    CONFIG_ENTRY_VERSION,
+    DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DEFAULT_POLLING_INTERVAL_HOURS,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
-    OPT_ENABLE_CO2_ESTIMATE,
-    OPT_ENABLE_DETAILED_SENSORS,
     OPT_HISTORY_MONTHS,
     OPT_POLLING_INTERVAL_HOURS,
     SENSITIVE_CONFIG_DATA_KEYS,
@@ -767,6 +767,12 @@ def make_entry() -> FakeConfigEntry:
     )
 
 
+def test_config_flow_uses_current_entry_version() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    assert KepcoOnConfigFlow.VERSION == CONFIG_ENTRY_VERSION == 2
+
+
 @pytest.mark.asyncio
 async def test_options_flow_accepts_valid_values() -> None:
     from custom_components.kepco_on.config_flow import KepcoOnOptionsFlow
@@ -778,8 +784,6 @@ async def test_options_flow_accepts_valid_values() -> None:
     result = await flow.async_step_init(
         {
             OPT_POLLING_INTERVAL_HOURS: 12,
-            OPT_ENABLE_DETAILED_SENSORS: True,
-            OPT_ENABLE_CO2_ESTIMATE: True,
             OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
             OPT_HISTORY_MONTHS: 24,
         }
@@ -788,8 +792,6 @@ async def test_options_flow_accepts_valid_values() -> None:
     assert result["type"] == "create_entry"
     assert result["data"] == {
         OPT_POLLING_INTERVAL_HOURS: 12,
-        OPT_ENABLE_DETAILED_SENSORS: True,
-        OPT_ENABLE_CO2_ESTIMATE: True,
         OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
         OPT_HISTORY_MONTHS: 24,
     }
@@ -805,9 +807,7 @@ async def test_options_flow_rejects_invalid_values() -> None:
 
     valid = {
         OPT_POLLING_INTERVAL_HOURS: 6,
-        OPT_ENABLE_DETAILED_SENSORS: False,
-        OPT_ENABLE_CO2_ESTIMATE: False,
-        OPT_CO2_FACTOR_KG_PER_KWH: 0.459,
+        OPT_CO2_FACTOR_KG_PER_KWH: DEFAULT_CO2_FACTOR_KG_PER_KWH,
         OPT_HISTORY_MONTHS: 12,
     }
     for payload, error in (
@@ -842,14 +842,14 @@ async def test_options_flow_default_form_values() -> None:
     assert all("selected_customers" not in str(config) for config in selector_configs)
     defaults = [key.default() for key in schema]
     assert str(DEFAULT_POLLING_INTERVAL_HOURS) in defaults
-    assert 0.459 in defaults
+    assert DEFAULT_CO2_FACTOR_KG_PER_KWH in defaults
     co2_selector = next(
         value for key, value in schema.items() if key.schema == OPT_CO2_FACTOR_KG_PER_KWH
     )
     assert co2_selector.config["min"] == 0.001
 
 
-def test_options_schema_uses_string_default_for_select_when_only_toggles_change() -> None:
+def test_options_schema_uses_string_default_for_select_when_other_values_change() -> None:
     from custom_components.kepco_on.config_flow import KepcoOnOptionsFlow
 
     entry = make_entry()
@@ -858,14 +858,14 @@ def test_options_schema_uses_string_default_for_select_when_only_toggles_change(
 
     validated = flow._schema()(
         {
-            OPT_ENABLE_DETAILED_SENSORS: True,
-            OPT_ENABLE_CO2_ESTIMATE: True,
+            OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
+            OPT_HISTORY_MONTHS: 18,
         }
     )
 
     assert validated[OPT_POLLING_INTERVAL_HOURS] == "6"
-    assert validated[OPT_ENABLE_DETAILED_SENSORS] is True
-    assert validated[OPT_ENABLE_CO2_ESTIMATE] is True
+    assert validated[OPT_CO2_FACTOR_KG_PER_KWH] == 0.5
+    assert validated[OPT_HISTORY_MONTHS] == 18
 
 
 @pytest.mark.asyncio
@@ -1277,9 +1277,7 @@ async def test_options_flow_completion_schedules_one_reload() -> None:
     result = await flow.async_step_init(
         {
             OPT_POLLING_INTERVAL_HOURS: "6",
-            OPT_ENABLE_DETAILED_SENSORS: True,
-            OPT_ENABLE_CO2_ESTIMATE: True,
-            OPT_CO2_FACTOR_KG_PER_KWH: "0.459",
+            OPT_CO2_FACTOR_KG_PER_KWH: str(DEFAULT_CO2_FACTOR_KG_PER_KWH),
             OPT_HISTORY_MONTHS: 18,
         }
     )

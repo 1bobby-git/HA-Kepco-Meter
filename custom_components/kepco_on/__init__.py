@@ -16,7 +16,14 @@ from homeassistant.util import dt as dt_util
 
 from .api import KepcoOnClient
 from .auth import KepcoOnAuth
-from .const import CONF_SESSION_HANDOFF, CONF_USERNAME, PLATFORMS
+from .const import (
+    CONF_SESSION_HANDOFF,
+    CONF_USERNAME,
+    CONFIG_ENTRY_VERSION,
+    OPT_ENABLE_CO2_ESTIMATE,
+    OPT_ENABLE_DETAILED_SENSORS,
+    PLATFORMS,
+)
 from .coordinator import KepcoOnDataUpdateCoordinator
 from .exceptions import (
     KepcoOnAuthError,
@@ -52,6 +59,24 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     """Set up KEPCO ON integration-level services."""
     del config
     await async_setup_services(hass)
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate legacy optional sensor toggles to the five-device sensor model."""
+    if entry.version == CONFIG_ENTRY_VERSION:
+        return True
+    if entry.version != 1:
+        return False
+
+    options = dict(entry.options)
+    options.pop(OPT_ENABLE_DETAILED_SENSORS, None)
+    options.pop(OPT_ENABLE_CO2_ESTIMATE, None)
+    hass.config_entries.async_update_entry(
+        entry,
+        options=options,
+        version=CONFIG_ENTRY_VERSION,
+    )
     return True
 
 
@@ -215,6 +240,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> 
 __all__ = [
     "KepcoOnConfigEntry",
     "KepcoOnRuntimeData",
+    "async_migrate_entry",
     "async_setup",
     "async_setup_entry",
     "async_unload_entry",

@@ -18,6 +18,7 @@ from custom_components.kepco_on.const import (
     CONF_SELECTED_CUSTOMERS,
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
+    CONFIG_ENTRY_VERSION,
     DEFAULT_POLLING_INTERVAL_HOURS,
     OPT_CO2_FACTOR_KG_PER_KWH,
     OPT_ENABLE_CO2_ESTIMATE,
@@ -213,6 +214,7 @@ class FakeConfigEntries:
         self.unloaded: list[tuple[FakeConfigEntry, tuple[Any, ...]]] = []
         self.reloads: list[str] = []
         self.updates: list[dict[str, Any]] = []
+        self.version_updates: list[int] = []
         self.entries_by_id: dict[str, FakeConfigEntry] = {}
         self.forward_result = True
         self.unload_result = True
@@ -226,6 +228,7 @@ class FakeConfigEntries:
         *,
         data: Mapping[str, Any] | None = None,
         options: Mapping[str, Any] | None = None,
+        version: int | None = None,
         **_: Any,
     ) -> bool:
         if data is not None:
@@ -233,6 +236,9 @@ class FakeConfigEntries:
             self.updates.append(dict(data))
         if options is not None:
             entry.options = dict(options)
+        if version is not None:
+            entry.version = version
+            self.version_updates.append(version)
         return True
 
     def async_schedule_reload(self, entry_id: str) -> None:
@@ -281,11 +287,13 @@ class FakeConfigEntry:
         data: Mapping[str, Any],
         options: Mapping[str, Any] | None = None,
         entry_id: str = "entry-1",
+        version: int = CONFIG_ENTRY_VERSION,
     ) -> None:
         self.entry_id = entry_id
         self.data = dict(data)
         self.options = dict(options or {})
         self.runtime_data: Any = None
+        self.version = version
         self.state = ConfigEntryState.LOADED
         self.unload_callbacks: list[Callable[[], None]] = []
         self.update_listeners: list[Callable[..., Any]] = []
@@ -386,6 +394,7 @@ def make_entry(
     customers: tuple[KepcoCustomer, ...] = (customer("key-1"),),
     selected: list[str] | None = None,
     options: Mapping[str, Any] | None = None,
+    version: int = CONFIG_ENTRY_VERSION,
 ) -> FakeConfigEntry:
     data: dict[str, Any] = {
         CONF_USERNAME: "input-user",
@@ -398,7 +407,48 @@ def make_entry(
         data[CONF_PASSWORD] = PASSWORD_SECRET
     if with_handoff:
         data[CONF_SESSION_HANDOFF] = session_to_payload(account_session())
-    return FakeConfigEntry(data=data, options=options)
+    return FakeConfigEntry(data=data, options=options, version=version)
+
+
+@pytest.mark.asyncio
+async def test_migrate_v1_removes_legacy_sensor_toggles_and_preserves_options() -> None:
+    from custom_components.kepco_on import async_migrate_entry
+
+    hass = FakeHass()
+    entry = make_entry(
+        version=1,
+        options={
+            OPT_POLLING_INTERVAL_HOURS: 12,
+            OPT_ENABLE_DETAILED_SENSORS: False,
+            OPT_ENABLE_CO2_ESTIMATE: False,
+            OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
+            OPT_HISTORY_MONTHS: 18,
+        },
+    )
+
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", entry)) is True
+
+    assert entry.version == CONFIG_ENTRY_VERSION
+    assert entry.options == {
+        OPT_POLLING_INTERVAL_HOURS: 12,
+        OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
+        OPT_HISTORY_MONTHS: 18,
+    }
+    assert hass.config_entries.version_updates == [CONFIG_ENTRY_VERSION]
+
+
+@pytest.mark.asyncio
+async def test_migrate_current_entry_is_noop_and_unknown_version_is_rejected() -> None:
+    from custom_components.kepco_on import async_migrate_entry
+
+    hass = FakeHass()
+    current = make_entry(options={OPT_HISTORY_MONTHS: 12})
+    future = make_entry(version=CONFIG_ENTRY_VERSION + 1)
+
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", current)) is True
+    assert await async_migrate_entry(cast("Any", hass), cast("Any", future)) is False
+    assert hass.config_entries.version_updates == []
+    assert current.options == {OPT_HISTORY_MONTHS: 12}
 
 
 @pytest.mark.asyncio
@@ -737,8 +787,6 @@ async def test_options_flow_after_setup_schedules_one_reload_without_listener_co
     result = await flow.async_step_init(
         {
             OPT_POLLING_INTERVAL_HOURS: "6",
-            OPT_ENABLE_DETAILED_SENSORS: True,
-            OPT_ENABLE_CO2_ESTIMATE: True,
             OPT_CO2_FACTOR_KG_PER_KWH: "0.459",
             OPT_HISTORY_MONTHS: 18,
         }

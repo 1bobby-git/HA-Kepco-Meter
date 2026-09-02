@@ -147,6 +147,10 @@ def parse_bill(payload: dict[str, object], requested_month: str | None) -> Kepco
         period_start=parse_date(_field(result, "DO_FROM_MMDD"), "period_start"),
         period_end=parse_date(_field(result, "DO_TO_MMDD"), "period_end"),
         usage_kwh=parse_int(_field(result, "DO_KWH"), "usage_kwh"),
+        household_usage_kwh=parse_int(
+            _field(result, "DO_TP_RSD_KWH"), "household_usage_kwh"
+        ),
+        common_usage_kwh=parse_int(_field(result, "DO_TP_CMNUS_KWH"), "common_usage_kwh"),
         previous_usage_kwh=parse_int(_field(result, "DO_BEF_KWH"), "previous_usage_kwh"),
         last_year_usage_kwh=parse_int(_field(result, "DO_LAST_YEAR_KWH"), "last_year_usage_kwh"),
         building_average_kwh=parse_int(

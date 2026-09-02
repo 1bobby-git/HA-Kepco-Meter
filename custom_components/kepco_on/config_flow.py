@@ -29,11 +29,11 @@ from .const import (
     CONF_SELECTED_CUSTOMERS,
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
+    CONFIG_ENTRY_VERSION,
+    DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DEFAULT_POLLING_INTERVAL_HOURS,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
-    OPT_ENABLE_CO2_ESTIMATE,
-    OPT_ENABLE_DETAILED_SENSORS,
     OPT_HISTORY_MONTHS,
     OPT_POLLING_INTERVAL_HOURS,
     POLLING_INTERVAL_HOURS,
@@ -58,7 +58,6 @@ from .models import (
 from .session_store import session_to_payload
 
 DEFAULT_TITLE = "한전ON"
-DEFAULT_CO2_FACTOR = 0.459
 DEFAULT_HISTORY_MONTHS = 12
 MIN_CO2_FACTOR = 0.001
 
@@ -196,7 +195,7 @@ async def _close_session(client_session: Any | None) -> None:
 class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle KEPCO ON config, reauth, and reconfigure flows."""
 
-    VERSION = 1
+    VERSION = CONFIG_ENTRY_VERSION
 
     def __init__(self) -> None:
         self._pending: PendingConfig | None = None
@@ -546,17 +545,11 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
-                vol.Optional(
-                    OPT_ENABLE_DETAILED_SENSORS,
-                    default=options.get(OPT_ENABLE_DETAILED_SENSORS, False),
-                ): bool,
-                vol.Optional(
-                    OPT_ENABLE_CO2_ESTIMATE,
-                    default=options.get(OPT_ENABLE_CO2_ESTIMATE, False),
-                ): bool,
                 vol.Required(
                     OPT_CO2_FACTOR_KG_PER_KWH,
-                    default=options.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR),
+                    default=options.get(
+                        OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH
+                    ),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=MIN_CO2_FACTOR,
@@ -593,7 +586,13 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
             return {}, "unknown"
         try:
             co2_factor = float(
-                Decimal(str(user_input.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR)))
+                Decimal(
+                    str(
+                        user_input.get(
+                            OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH
+                        )
+                    )
+                )
             )
         except InvalidOperation, ValueError:
             return {}, "invalid_co2_factor"
@@ -608,10 +607,6 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
         return (
             {
                 OPT_POLLING_INTERVAL_HOURS: interval,
-                OPT_ENABLE_DETAILED_SENSORS: bool(
-                    user_input.get(OPT_ENABLE_DETAILED_SENSORS, False)
-                ),
-                OPT_ENABLE_CO2_ESTIMATE: bool(user_input.get(OPT_ENABLE_CO2_ESTIMATE, False)),
                 OPT_CO2_FACTOR_KG_PER_KWH: co2_factor,
                 OPT_HISTORY_MONTHS: history_months,
             },

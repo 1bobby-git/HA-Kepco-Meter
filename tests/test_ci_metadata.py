@@ -186,7 +186,7 @@ def scan_fixture(value: object, path: tuple[str, ...] = ()) -> None:
 def test_workflow_yaml_files_parse_with_github_on_key() -> None:
     workflows = {path.name: load_yaml(path) for path in WORKFLOWS.glob("*.yml")}
 
-    assert set(workflows) == {"tests.yml", "validate.yml"}
+    assert set(workflows) == {"release.yml", "tests.yml", "validate.yml"}
     for workflow in workflows.values():
         assert isinstance(workflow_on(workflow), dict)
 
@@ -247,6 +247,47 @@ def test_validate_workflow_runs_hacs_and_hassfest_required_checks() -> None:
     assert "continue-on-error" not in json.dumps(workflow)
 
 
+def test_release_workflow_waits_for_both_ci_workflows_and_publishes_hacs_archive() -> None:
+    workflow = load_yaml(WORKFLOWS / "release.yml")
+    source = workflow_text("release.yml")
+    triggers = workflow_on(workflow)
+    jobs = cast("dict[str, Any]", workflow["jobs"])
+    release_job = cast("dict[str, Any]", jobs["release"])
+    steps = run_steps(workflow, "release")
+
+    assert triggers == {
+        "workflow_run": {
+            "workflows": ["Tests"],
+            "types": ["completed"],
+            "branches": ["main"],
+        }
+    }
+    assert workflow["permissions"] == {"actions": "read", "contents": "write"}
+    assert workflow["concurrency"] == {
+        "group": "release-${{ github.event.workflow_run.head_sha }}",
+        "cancel-in-progress": False,
+    }
+    assert set(jobs) == {"release"}
+    assert release_job["runs-on"] == "ubuntu-24.04"
+    assert release_job["if"] == "github.event.workflow_run.conclusion == 'success'"
+    assert_pinned_action(source, steps, "actions/checkout")
+    assert cast("dict[str, Any]", steps[0]["with"]) == {
+        "ref": "${{ env.RELEASE_SHA }}",
+        "fetch-depth": 0,
+    }
+    assert "name: Validate" in source or 'run.get("name") == "Validate"' in source
+    assert "git archive" in source
+    assert "custom_components/kepco_on/" in source
+    assert "gh release create" in source
+    assert "--notes-file RELEASE_NOTES.md" in source
+    assert "pull_request_target" not in source
+    assert "continue-on-error" not in source
+
+    release_notes = (ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
+    assert release_notes.startswith("## 한전ON v0.2.0\n")
+    assert "5개 기기와 32개 센서 엔티티" in release_notes
+
+
 def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     manifest = load_json(ROOT / "custom_components" / "kepco_on" / "manifest.json")
     hacs = load_json(ROOT / "hacs.json")
@@ -255,7 +296,7 @@ def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     release_version = Version(cast("str", manifest["version"]))
 
     assert release_version == Version(cast("str", pyproject["project"]["version"]))
-    assert release_version == Version("0.1.1")
+    assert release_version == Version("0.2.0")
     assert release_version.is_prerelease is False
     assert release_version.is_devrelease is False
     assert manifest["requirements"] == []

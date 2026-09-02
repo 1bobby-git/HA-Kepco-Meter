@@ -312,6 +312,8 @@ def test_parse_latest_bill_extracts_all_governing_values() -> None:
     assert bill.period_start == date(2026, 7, 1)
     assert bill.period_end == date(2026, 7, 31)
     assert bill.usage_kwh == 573
+    assert bill.household_usage_kwh is None
+    assert bill.common_usage_kwh is None
     assert bill.previous_usage_kwh == 406
     assert bill.last_year_usage_kwh == 612
     assert bill.building_average_kwh == 363
@@ -342,6 +344,8 @@ def test_parse_requested_bill_uses_requested_month_over_response_month() -> None
     assert bill.period_start == date(2026, 6, 1)
     assert bill.period_end == date(2026, 6, 30)
     assert bill.usage_kwh == 406
+    assert bill.household_usage_kwh is None
+    assert bill.common_usage_kwh is None
     assert bill.previous_usage_kwh == 371
     assert bill.last_year_usage_kwh == 459
     assert bill.building_average_kwh == 248
@@ -361,6 +365,18 @@ def test_parse_requested_bill_uses_requested_month_over_response_month() -> None
     assert bill.charge.rounding_krw == 7
     assert bill.history[0].month == "202408"
     assert bill.history[-1].month == "202607"
+
+
+def test_parse_bill_extracts_explicit_household_and_common_usage() -> None:
+    payload = load_fixture("bill_latest.json")
+    result = as_object_dict(payload["dma_result"])
+    result["DO_TP_RSD_KWH"] = "560"
+    result["DO_TP_CMNUS_KWH"] = "13"
+
+    parsed = parse_bill(payload, requested_month=None)
+
+    assert parsed.household_usage_kwh == 560
+    assert parsed.common_usage_kwh == 13
 
 
 def test_parse_bill_status_success_accepts_hxi001() -> None:
