@@ -81,7 +81,7 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         try:
             title = customer_selection_title(strict_selected_stored_customers(entry.data))
         except ValueError:
-            pass
+            title = DEFAULT_TITLE
 
     hass.config_entries.async_update_entry(
         entry,
