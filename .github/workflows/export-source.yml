@@ -1,0 +1,28 @@
+name: Export branch source
+
+on:
+  push:
+    branches:
+      - feature/five-sensor-devices
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Create source archive
+        run: tar --exclude=.git -czf /tmp/ha-kepco-meter.tar.gz .
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ha-kepco-meter-source
+          path: /tmp/ha-kepco-meter.tar.gz
+          retention-days: 1
