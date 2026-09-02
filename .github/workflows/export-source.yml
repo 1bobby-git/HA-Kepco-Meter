@@ -5,7 +5,7 @@ on:
     branches:
       - feature/five-sensor-devices
     paths:
-      - .github/five-sensor-update.patch
+      - .github/five-sensor-update.ready
 
 permissions:
   contents: write
@@ -26,8 +26,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          git apply --index .github/five-sensor-update.patch
-          rm .github/five-sensor-update.patch
+          cat .github/five-sensor-update.patch.b64.part-* | base64 --decode > /tmp/five-sensor-update.patch
+          git apply --index /tmp/five-sensor-update.patch
+          rm .github/five-sensor-update.patch.b64.part-*
+          rm .github/five-sensor-update.ready
           rm .github/workflows/export-source.yml
           git add -A
           git diff --cached --check
