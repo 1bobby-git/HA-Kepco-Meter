@@ -297,7 +297,7 @@ def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     release_version = Version(cast("str", manifest["version"]))
 
     assert release_version == Version(cast("str", pyproject["project"]["version"]))
-    assert release_version == Version("0.2.4")
+    assert release_version == Version("0.3.0")
     assert release_version.is_prerelease is False
     assert release_version.is_devrelease is False
     assert manifest["requirements"] == []

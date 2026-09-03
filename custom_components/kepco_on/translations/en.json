@@ -243,6 +243,12 @@
       },
       "last_year_same_month_co2": {
         "name": "Last year same month emissions"
+      },
+      "current_period_usage": {
+        "name": "Current period usage"
+      },
+      "predicted_period_usage": {
+        "name": "KEPCO predicted usage"
       }
     }
   }

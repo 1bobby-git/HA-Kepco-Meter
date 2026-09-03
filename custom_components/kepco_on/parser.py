@@ -15,6 +15,10 @@ from .models import (
 )
 
 SUPPORTED_APARTMENT_CONTRACT = "아파트(단일계약)"
+SUPPORTED_HOUSE_CONTRACT_PREFIX = "주택용"
+HOUSE_PERIOD_PATTERN = re.compile(
+    r"([0-9]{4})\.([0-9]{2})\.([0-9]{2})-([0-9]{4})\.([0-9]{2})\.([0-9]{2})"
+)
 ASCII_INTEGER_PATTERN = re.compile(r"-?(?:[0-9]+|[0-9]{1,3}(?:,[0-9]{3})+)")
 ASCII_DATE_PATTERN = re.compile(r"[0-9]{8}")
 ASCII_YEAR_MONTH_PATTERN = re.compile(r"[0-9]{6}")
@@ -103,10 +107,28 @@ def parse_customers(payload: dict[str, object], account_uid_hash: str) -> tuple[
     customers: list[KepcoCustomer] = []
     for index, row in enumerate(rows):
         contract_method = _optional_str(row, "cntrMthdCd") or ""
+        display_index = index + 1
+        if "CUST_NO" not in row and contract_method.startswith(SUPPORTED_HOUSE_CONTRACT_PREFIX):
+            # 주택용 직접계약: 목록 row에 CUST_NO가 없고 SI_CUST_NO가 고객번호다.
+            customer_number = _required_str(row, "SI_CUST_NO")
+            stable_key = _stable_customer_key(account_uid_hash, customer_number, customer_number)
+            customers.append(
+                KepcoCustomer(
+                    stable_key=stable_key,
+                    apartment_name=contract_method or f"한전ON 고객 {display_index}",
+                    dong="-",
+                    ho="-",
+                    contract_method=contract_method,
+                    is_supported=True,
+                    _customer_number=customer_number,
+                    _house_contract_number=customer_number,
+                    _change_ymd=_optional_str(row, "DC_USER_CHG_NM_YMD") or "",
+                )
+            )
+            continue
         customer_number = _required_str(row, "CUST_NO")
         house_contract_number = _required_str(row, "SI_CUST_NO")
         stable_key = _stable_customer_key(account_uid_hash, customer_number, house_contract_number)
-        display_index = index + 1
         customers.append(
             KepcoCustomer(
                 stable_key=stable_key,
@@ -122,6 +144,90 @@ def parse_customers(payload: dict[str, object], account_uid_hash: str) -> tuple[
         if not customers[index].is_supported:
             raise KepcoOnProtocolError("Only apartment single-contract customers are supported")
     return tuple(customers)
+
+
+def parse_house_bill(payload: dict[str, object]) -> KepcoBill:
+    """Parse a 주택용 monthly billing history (mainChart) response into a bill."""
+    raw_rows = payload.get("dlt_chart")
+    if not isinstance(raw_rows, list) or not raw_rows:
+        raise KepcoOnProtocolError("house bill chart is missing")
+
+    points: list[tuple[str, KepcoUsageHistoryPoint, object]] = []
+    for item in raw_rows:
+        if not isinstance(item, dict):
+            raise KepcoOnProtocolError("house bill entries must be objects")
+        month = parse_year_month(item.get("jojYmFilter"), "house_bill_month")
+        if month is None:
+            raise KepcoOnProtocolError("house bill month is missing")
+        points.append(
+            (
+                month,
+                KepcoUsageHistoryPoint(
+                    month=month,
+                    usage_kwh=parse_int(item.get("kwh"), "house_usage"),
+                    amount_krw=parse_int(item.get("afterMny"), "house_amount"),
+                ),
+                item.get("gigan"),
+            )
+        )
+    points.sort(key=lambda entry: entry[0])
+    if len({month for month, _, _ in points}) != len(points):
+        raise KepcoOnProtocolError("house bill history contains duplicate months")
+
+    latest_month, latest_point, latest_period = points[-1]
+    period_start, period_end = _parse_house_period(latest_period)
+    return KepcoBill(
+        bill_month=latest_month,
+        response_bill_month=latest_month,
+        period_start=period_start,
+        period_end=period_end,
+        usage_kwh=latest_point.usage_kwh,
+        amount_krw=latest_point.amount_krw,
+        history=tuple(point for _, point, _ in points),
+    )
+
+
+def parse_power_planner(payload: dict[str, object]) -> tuple[float | None, float | None]:
+    """Parse 파워플래너 현재 검침기간 누적/예측 사용량 (kWh)."""
+    result = payload.get("dma_powerPlanner")
+    if not isinstance(result, dict):
+        return (None, None)
+    return (
+        _parse_float(result.get("F_AP_QT"), "current_period_usage"),
+        _parse_float(result.get("PREDICT_TOT"), "predicted_usage"),
+    )
+
+
+def _parse_float(value: object, field_name: str) -> float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise KepcoOnProtocolError(f"{field_name} must be a number")
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        normalized = value.strip().replace(",", "")
+        if normalized == "" or normalized.lower() == "null":
+            return None
+        try:
+            return float(normalized)
+        except ValueError as err:
+            raise KepcoOnProtocolError(f"{field_name} must be a number") from err
+    raise KepcoOnProtocolError(f"{field_name} must be a number")
+
+
+def _parse_house_period(value: object) -> tuple[date | None, date | None]:
+    if not isinstance(value, str):
+        return (None, None)
+    match = HOUSE_PERIOD_PATTERN.fullmatch(value.strip())
+    if match is None:
+        return (None, None)
+    try:
+        start = date(int(match[1]), int(match[2]), int(match[3]))
+        end = date(int(match[4]), int(match[5]), int(match[6]))
+    except ValueError:
+        return (None, None)
+    return (start, end)
 
 
 def parse_bill(payload: dict[str, object], requested_month: str | None) -> KepcoBill:
@@ -316,6 +422,8 @@ __all__ = [
     "parse_customers",
     "parse_date",
     "parse_day_of_month",
+    "parse_house_bill",
     "parse_int",
+    "parse_power_planner",
     "parse_year_month",
 ]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -18,7 +19,9 @@ from .const import (
     ENDPOINT_CUST_NO_LIST,
     ENDPOINT_IS_CORP,
     ENDPOINT_LOGIN_INDI,
+    ENDPOINT_MAIN_CHART,
     ENDPOINT_MYPAGE_CUST_NO_LIST,
+    ENDPOINT_POWER_PLANNER,
     ENDPOINT_SESSION_CHECK,
     ENDPOINT_SSO_CHECK,
     PAGE_URL,
@@ -32,7 +35,13 @@ from .exceptions import (
     KepcoOnUnsupportedAccount,
 )
 from .models import KepcoBill, KepcoCustomer
-from .parser import parse_bill, parse_customers, parse_year_month
+from .parser import (
+    parse_bill,
+    parse_customers,
+    parse_house_bill,
+    parse_power_planner,
+    parse_year_month,
+)
 
 JsonObject = dict[str, object]
 SleepCallback = Callable[[float], Awaitable[None]]
@@ -303,6 +312,8 @@ class KepcoOnClient:
 
     async def async_get_bill(self, customer: KepcoCustomer, month: str | None = None) -> KepcoBill:
         """Return latest or requested-month bill detail for a customer."""
+        if customer.is_house:
+            return await self._async_get_house_bill(customer)
         requested_month = self._validated_month(month)
         payload = await self._auth.async_protected_request(
             ENDPOINT_APT_BILL_DETAIL,
@@ -318,6 +329,47 @@ class KepcoOnClient:
             submission_id="mf_wfm_layout_sbm_search",
         )
         return parse_bill(payload, requested_month)
+
+    async def _async_get_house_bill(self, customer: KepcoCustomer) -> KepcoBill:
+        """Return 주택용 billing history (mainChart) + 파워플래너 현재/예측."""
+        chg_ym = customer.change_ymd[:6] if customer.change_ymd else ""
+        search = {
+            "schYm": "",
+            "custNo": customer.customer_number,
+            "gubun": "",
+            "schChart": "12",
+            "CUST_NO": "",
+            "housCntrNo": "",
+            "yyyymm": "",
+            "searchType": "",
+            "dong": "",
+            "ho": "",
+            "months": "13",
+            "chgYmd": chg_ym,
+        }
+        payload = await self._auth.async_protected_request(
+            ENDPOINT_MAIN_CHART,
+            {"dma_search": search},
+            submission_id="mf_wfm_layout_sbm_houseChart",
+        )
+        bill = parse_house_bill(payload)
+        # 파워플래너는 부가 정보라 실패해도 청구 이력은 유지한다.
+        try:
+            planner_payload = await self._auth.async_protected_request(
+                ENDPOINT_POWER_PLANNER,
+                {"dma_search": {**search, "months": ""}},
+                submission_id="mf_wfm_layout_sbm_powerPlanner",
+            )
+        except (KepcoOnConnectionError, KepcoOnProtocolError, KepcoOnRateLimitError):
+            return bill
+        current_usage, predicted_usage = parse_power_planner(planner_payload)
+        if current_usage is None and predicted_usage is None:
+            return bill
+        return dataclasses.replace(
+            bill,
+            current_period_usage_kwh=current_usage,
+            predicted_period_usage_kwh=predicted_usage,
+        )
 
     async def async_get_all_current_bills(
         self, customers: Sequence[KepcoCustomer]

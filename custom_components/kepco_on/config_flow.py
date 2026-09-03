@@ -103,6 +103,8 @@ def _account_uid_hash(user_id: str) -> str:
 
 
 def _customer_label(customer: KepcoCustomer) -> str:
+    if customer.is_house:
+        return f"{customer.apartment_name} ({customer.customer_number[:2]}-****)"
     return f"{customer.apartment_name} {customer_location_name(customer)}"
 
 
