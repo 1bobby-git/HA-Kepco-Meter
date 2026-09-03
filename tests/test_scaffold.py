@@ -119,7 +119,7 @@ def test_gitignore_blocks_capture_and_secret_artifacts() -> None:
 def test_constants_are_fixed_and_capture_safe() -> None:
     assert const.DOMAIN == "kepco_on"
     assert const.NAME == "KEPCO ON"
-    assert const.VERSION == "0.3.2"
+    assert const.VERSION == "0.3.1"
     assert const.CONFIG_ENTRY_VERSION == 3
     assert const.BASE_URL == "https://online.kepco.co.kr"
     assert const.PAGE_URL == "https://online.kepco.co.kr/MYM001D00"
