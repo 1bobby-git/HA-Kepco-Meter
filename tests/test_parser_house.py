@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import date
 from pathlib import Path
+from typing import cast
 
 import pytest
 from custom_components.kepco_on.exceptions import KepcoOnProtocolError
@@ -17,8 +18,11 @@ from custom_components.kepco_on.parser import (
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
-def _load(name: str) -> dict:
-    return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+def _load(name: str) -> dict[str, object]:
+    return cast(
+        "dict[str, object]",
+        json.loads((FIXTURES / name).read_text(encoding="utf-8")),
+    )
 
 
 def test_parse_customers_house_contract() -> None:
@@ -36,7 +40,11 @@ def test_parse_customers_house_contract() -> None:
 
 def test_parse_customers_house_without_si_cust_no_raises() -> None:
     payload = _load("house_customer_list.json")
-    del payload["dlt_myPageAppendList"][0]["SI_CUST_NO"]
+    rows = payload.get("dlt_myPageAppendList")
+    assert isinstance(rows, list)
+    row = rows[0]
+    assert isinstance(row, dict)
+    del row["SI_CUST_NO"]
     with pytest.raises(KepcoOnProtocolError):
         parse_customers(payload, "uidhash")
 

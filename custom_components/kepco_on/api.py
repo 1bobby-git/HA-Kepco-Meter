@@ -362,7 +362,7 @@ class KepcoOnClient:
                 {"dma_search": {**search, "months": ""}},
                 submission_id="mf_wfm_layout_sbm_powerPlanner",
             )
-        except (KepcoOnConnectionError, KepcoOnProtocolError, KepcoOnRateLimitError):
+        except KepcoOnConnectionError, KepcoOnProtocolError, KepcoOnRateLimitError:
             return bill
         current_usage, predicted_usage = parse_power_planner(planner_payload)
         if current_usage is None and predicted_usage is None:

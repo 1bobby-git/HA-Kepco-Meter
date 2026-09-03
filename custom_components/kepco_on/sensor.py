@@ -29,7 +29,7 @@ from .const import DEFAULT_CO2_FACTOR_KG_PER_KWH, DOMAIN, OPT_CO2_FACTOR_KG_PER_
 from .coordinator import KepcoOnDataUpdateCoordinator
 from .models import KepcoBill, KepcoCustomer
 
-KepcoSensorValue = str | int | date | None
+KepcoSensorValue = str | int | float | date | None
 KepcoSensorAttributes = dict[str, str | date | int | None]
 KepcoValueFunction = Callable[[KepcoBill, dict[str, Any]], KepcoSensorValue]
 
