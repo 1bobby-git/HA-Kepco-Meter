@@ -4,7 +4,7 @@ from homeassistant.const import CONF_PASSWORD, Platform
 
 DOMAIN = "kepco_on"
 NAME = "KEPCO ON"
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 CONFIG_ENTRY_VERSION = 3
 
 BASE_URL = "https://online.kepco.co.kr"

@@ -5,5 +5,5 @@
     {"jojYm": "2026.06", "jojYmFilter": "202606", "kwh": "417", "afterMny": "98610", "sunapMny": "98610", "gigan": "2026.05.09-2026.06.08", "sunapBank": "카드"}
   ],
   "rsMsg": {},
-  "dma_chart": {"custNo": "01-0000-0001", "grpMaxKwh": "603"}
+  "dma_chart": {"custNo": "TEST_CUST_001", "grpMaxKwh": "603"}
 }

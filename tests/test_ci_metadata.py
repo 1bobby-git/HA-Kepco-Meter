@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import struct
 import subprocess
 import tomllib
@@ -39,6 +40,9 @@ ACTION_REFS = {
 }
 ALLOWED_FIXTURES = {
     "bill_202607.json",
+    "house_customer_list.json",
+    "house_main_chart.json",
+    "house_power_planner.json",
     "bill_latest.json",
     "customer_list_multiple.json",
     "customer_list_single.json",
@@ -90,6 +94,8 @@ FORBIDDEN_VALUE_PARTS = (
     "set-cookie",
 )
 SAFE_SYNTHETIC_FIXTURE_KEYS = {"apt_name", "apt_nm", "cust_no", "si_cust_no"}
+# 실제 KEPCO 응답 필드명(변경 불가)이지만 값은 YYYYMMDD 날짜라 개인정보가 아니다.
+SAFE_DATE_FIXTURE_KEYS = {"dc_user_chg_nm_ymd"}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -170,6 +176,9 @@ def scan_fixture(value: object, path: tuple[str, ...] = ()) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             normalized_key = str(key).replace("-", "_").lower()
+            if normalized_key in SAFE_DATE_FIXTURE_KEYS:
+                assert isinstance(item, str) and re.fullmatch(r"[0-9]{8}", item)
+                continue
             if normalized_key not in SAFE_SYNTHETIC_FIXTURE_KEYS:
                 assert normalized_key not in FORBIDDEN_KEYS
                 assert not any(part in normalized_key for part in FORBIDDEN_KEY_PARTS)
@@ -297,7 +306,7 @@ def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     release_version = Version(cast("str", manifest["version"]))
 
     assert release_version == Version(cast("str", pyproject["project"]["version"]))
-    assert release_version == Version("0.3.0")
+    assert release_version == Version("0.3.1")
     assert release_version.is_prerelease is False
     assert release_version.is_devrelease is False
     assert manifest["requirements"] == []

@@ -27,8 +27,8 @@ def test_parse_customers_house_contract() -> None:
     customer = customers[0]
     assert customer.is_house is True
     assert customer.is_supported is True
-    assert customer.customer_number == "0100000001"
-    assert customer.house_contract_number == "0100000001"
+    assert customer.customer_number == "TEST_SI_CUST_001"
+    assert customer.house_contract_number == "TEST_SI_CUST_001"
     assert customer.contract_method == "주택용/3kW"
     assert customer.change_ymd == "20260409"
     assert customer.apartment_name == "주택용/3kW"
