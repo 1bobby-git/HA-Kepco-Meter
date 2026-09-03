@@ -49,6 +49,51 @@ def test_parse_customers_house_without_si_cust_no_raises() -> None:
         parse_customers(payload, "uidhash")
 
 
+def test_parse_house_bill_rejects_non_object_rows() -> None:
+    payload = _load("house_main_chart.json")
+    cast("list[object]", payload["dlt_chart"]).append("not-a-dict")
+    with pytest.raises(KepcoOnProtocolError):
+        parse_house_bill(payload)
+
+
+def test_parse_house_bill_requires_month() -> None:
+    payload = _load("house_main_chart.json")
+    rows = cast("list[dict[str, object]]", payload["dlt_chart"])
+    del rows[0]["jojYmFilter"]
+    with pytest.raises(KepcoOnProtocolError):
+        parse_house_bill(payload)
+
+
+def test_parse_house_bill_rejects_duplicate_months() -> None:
+    payload = _load("house_main_chart.json")
+    rows = cast("list[dict[str, object]]", payload["dlt_chart"])
+    rows.append(dict(rows[0]))
+    with pytest.raises(KepcoOnProtocolError):
+        parse_house_bill(payload)
+
+
+@pytest.mark.parametrize("gigan", [None, "이상한 기간", "2026.02.30-2026.03.08"])
+def test_parse_house_bill_tolerates_bad_period(gigan: object) -> None:
+    payload = _load("house_main_chart.json")
+    rows = cast("list[dict[str, object]]", payload["dlt_chart"])
+    latest = max(rows, key=lambda row: str(row["jojYmFilter"]))
+    latest["gigan"] = gigan
+    bill = parse_house_bill(payload)
+    assert bill.period_start is None
+    assert bill.period_end is None
+
+
+def test_parse_power_planner_value_edges() -> None:
+    assert parse_power_planner({"dma_powerPlanner": {"F_AP_QT": 510, "PREDICT_TOT": "null"}}) == (
+        510.0,
+        None,
+    )
+    with pytest.raises(KepcoOnProtocolError):
+        parse_power_planner({"dma_powerPlanner": {"F_AP_QT": True}})
+    with pytest.raises(KepcoOnProtocolError):
+        parse_power_planner({"dma_powerPlanner": {"F_AP_QT": "abc"}})
+
+
 def test_parse_house_bill_latest_and_history() -> None:
     bill = parse_house_bill(_load("house_main_chart.json"))
     assert bill.bill_month == "202608"
