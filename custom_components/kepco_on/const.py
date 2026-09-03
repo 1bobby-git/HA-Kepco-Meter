@@ -4,7 +4,8 @@ from homeassistant.const import CONF_PASSWORD, Platform
 
 DOMAIN = "kepco_on"
 NAME = "KEPCO ON"
-VERSION = "0.1.1"
+VERSION = "0.3.1"
+CONFIG_ENTRY_VERSION = 3
 
 BASE_URL = "https://online.kepco.co.kr"
 PAGE_URL = "https://online.kepco.co.kr/MYM001D00"
@@ -17,9 +18,12 @@ ENDPOINT_IS_CORP = "/isCorp"
 ENDPOINT_MYPAGE_CUST_NO_LIST = "/my/indi/info/myPageCustNoList"
 ENDPOINT_CUST_NO_LIST = "/my/indi/info/custNoList"
 ENDPOINT_APT_BILL_DETAIL = "/my/charge/pay/aptBillDetail"
+ENDPOINT_MAIN_CHART = "/my/memo/mainChart"
+ENDPOINT_POWER_PLANNER = "/my/memo/powerPlanner"
 
 POLLING_INTERVAL_HOURS = (1, 3, 6, 12, 24)
 DEFAULT_POLLING_INTERVAL_HOURS = 6
+DEFAULT_CO2_FACTOR_KG_PER_KWH = 0.459
 
 PLATFORMS = (Platform.SENSOR,)
 
@@ -55,6 +59,7 @@ PERSISTED_COOKIE_ALLOWLIST: frozenset[str] = frozenset()
 __all__ = [
     "BASE_URL",
     "CANDIDATE_COOKIE_NAMES",
+    "CONFIG_ENTRY_VERSION",
     "CONF_ACCOUNT_UID_HASH",
     "CONF_CUSTOMERS",
     "CONF_DISPLAY_NAME",
@@ -71,6 +76,7 @@ __all__ = [
     "DATA_HOUSE_CONTRACT_NUMBER",
     "DATA_IS_SUPPORTED",
     "DATA_STABLE_KEY",
+    "DEFAULT_CO2_FACTOR_KG_PER_KWH",
     "DEFAULT_POLLING_INTERVAL_HOURS",
     "DOMAIN",
     "ENDPOINT_APT_BILL_DETAIL",
@@ -78,7 +84,9 @@ __all__ = [
     "ENDPOINT_FIRST_LOGIN_CHECK",
     "ENDPOINT_IS_CORP",
     "ENDPOINT_LOGIN_INDI",
+    "ENDPOINT_MAIN_CHART",
     "ENDPOINT_MYPAGE_CUST_NO_LIST",
+    "ENDPOINT_POWER_PLANNER",
     "ENDPOINT_SESSION_CHECK",
     "ENDPOINT_SSO_CHECK",
     "NAME",

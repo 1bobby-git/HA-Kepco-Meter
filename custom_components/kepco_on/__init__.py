@@ -16,7 +16,15 @@ from homeassistant.util import dt as dt_util
 
 from .api import KepcoOnClient
 from .auth import KepcoOnAuth
-from .const import CONF_SESSION_HANDOFF, CONF_USERNAME, PLATFORMS
+from .const import (
+    CONF_DISPLAY_NAME,
+    CONF_SESSION_HANDOFF,
+    CONF_USERNAME,
+    CONFIG_ENTRY_VERSION,
+    OPT_ENABLE_CO2_ESTIMATE,
+    OPT_ENABLE_DETAILED_SENSORS,
+    PLATFORMS,
+)
 from .coordinator import KepcoOnDataUpdateCoordinator
 from .exceptions import (
     KepcoOnAuthError,
@@ -26,7 +34,7 @@ from .exceptions import (
     KepcoOnRateLimitError,
     KepcoOnUnsupportedAccount,
 )
-from .models import strict_selected_stored_customers
+from .models import selected_customer_location_title, strict_selected_stored_customers
 from .repairs import async_clear_issue, async_create_issue
 from .services import async_setup_services
 from .session_store import KepcoOnSessionStore, session_from_payload
@@ -52,6 +60,38 @@ async def async_setup(hass: HomeAssistant, config: dict[str, object]) -> bool:
     """Set up KEPCO ON integration-level services."""
     del config
     await async_setup_services(hass)
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Migrate legacy sensor options and normalize the config-entry title."""
+    if entry.version == CONFIG_ENTRY_VERSION:
+        return True
+    if entry.version not in {1, 2}:
+        return False
+
+    try:
+        customers = strict_selected_stored_customers(entry.data)
+    except ValueError:
+        return False
+
+    options = dict(entry.options)
+    if entry.version == 1:
+        options.pop(OPT_ENABLE_DETAILED_SENSORS, None)
+        options.pop(OPT_ENABLE_CO2_ESTIMATE, None)
+
+    display_name = entry.data.get(CONF_DISPLAY_NAME)
+    title = (
+        display_name.strip()
+        if isinstance(display_name, str) and display_name.strip()
+        else selected_customer_location_title(customers)
+    )
+    hass.config_entries.async_update_entry(
+        entry,
+        title=title,
+        options=options,
+        version=CONFIG_ENTRY_VERSION,
+    )
     return True
 
 
@@ -215,6 +255,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> 
 __all__ = [
     "KepcoOnConfigEntry",
     "KepcoOnRuntimeData",
+    "async_migrate_entry",
     "async_setup",
     "async_setup_entry",
     "async_unload_entry",

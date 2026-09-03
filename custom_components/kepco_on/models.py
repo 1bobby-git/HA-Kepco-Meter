@@ -67,6 +67,17 @@ class KepcoCustomer:
     is_supported: bool
     _customer_number: str = field(repr=False)
     _house_contract_number: str = field(repr=False)
+    _change_ymd: str = field(default="", repr=False)
+
+    @property
+    def is_house(self) -> bool:
+        """Return True for 주택용 direct contracts (non-apartment)."""
+        return self.contract_method.startswith("주택용")
+
+    @property
+    def change_ymd(self) -> str:
+        """Return the contract change date (YYYYMMDD) if known."""
+        return self._change_ymd
 
     @property
     def customer_number(self) -> str:
@@ -77,6 +88,33 @@ class KepcoCustomer:
     def house_contract_number(self) -> str:
         """Return the apartment house contract number."""
         return self._house_contract_number
+
+
+def _normalized_location_component(value: str) -> str:
+    """Normalize a KEPCO dong/ho component for human-readable display."""
+    stripped = value.strip()
+    if stripped.isdecimal():
+        return str(int(stripped))
+    return stripped
+
+
+def customer_location_name(customer: KepcoCustomer) -> str:
+    """Return a normalized, apartment-name-free customer location."""
+    if customer.is_house:
+        return customer.apartment_name
+    dong = _normalized_location_component(customer.dong)
+    ho = _normalized_location_component(customer.ho)
+    return f"{dong}동 {ho}호"
+
+
+def selected_customer_location_title(customers: Sequence[KepcoCustomer]) -> str:
+    """Return the config-entry title for one or more selected customers."""
+    if not customers:
+        raise ValueError("Selected KEPCO ON customers are unavailable")
+    primary = customer_location_name(customers[0])
+    if len(customers) == 1:
+        return primary
+    return f"{primary} 외 {len(customers) - 1}세대"
 
 
 @dataclass(frozen=True, slots=True)
@@ -112,6 +150,8 @@ class KepcoBill:
     period_start: date | None = None
     period_end: date | None = None
     usage_kwh: int | None = None
+    household_usage_kwh: int | None = None
+    common_usage_kwh: int | None = None
     previous_usage_kwh: int | None = None
     last_year_usage_kwh: int | None = None
     building_average_kwh: int | None = None
@@ -122,6 +162,8 @@ class KepcoBill:
     amount_krw: int | None = None
     charge: KepcoChargeBreakdown = field(default_factory=KepcoChargeBreakdown)
     history: tuple[KepcoUsageHistoryPoint, ...] = ()
+    current_period_usage_kwh: float | None = None
+    predicted_period_usage_kwh: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,6 +216,7 @@ def serialize_customer(customer: KepcoCustomer) -> dict[str, Any]:
         DATA_IS_SUPPORTED: customer.is_supported,
         DATA_CUSTOMER_NUMBER: customer.customer_number,
         DATA_HOUSE_CONTRACT_NUMBER: customer.house_contract_number,
+        "change_ymd": customer.change_ymd,
     }
 
 
@@ -198,6 +241,7 @@ def deserialize_customer(payload: Mapping[str, Any]) -> KepcoCustomer:
         is_supported=is_supported,
         _customer_number=_require_nonempty_str(payload, DATA_CUSTOMER_NUMBER),
         _house_contract_number=_require_nonempty_str(payload, DATA_HOUSE_CONTRACT_NUMBER),
+        _change_ymd=str(payload.get("change_ymd") or ""),
     )
 
 
@@ -262,7 +306,9 @@ __all__ = [
     "KepcoCustomer",
     "KepcoCustomerUpdateResult",
     "KepcoUsageHistoryPoint",
+    "customer_location_name",
     "deserialize_customer",
+    "selected_customer_location_title",
     "selected_customers",
     "serialize_customer",
     "stored_customers",

@@ -22,13 +22,13 @@ from custom_components.kepco_on.const import (
     CONF_SELECTED_CUSTOMERS,
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
+    CONFIG_ENTRY_VERSION,
     DATA_CUSTOMER_NUMBER,
     DATA_HOUSE_CONTRACT_NUMBER,
+    DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DEFAULT_POLLING_INTERVAL_HOURS,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
-    OPT_ENABLE_CO2_ESTIMATE,
-    OPT_ENABLE_DETAILED_SENSORS,
     OPT_HISTORY_MONTHS,
     OPT_POLLING_INTERVAL_HOURS,
     SENSITIVE_CONFIG_DATA_KEYS,
@@ -297,12 +297,18 @@ def account_session(user_id: str = "SERVER_USER") -> KepcoAccountSession:
     )
 
 
-def customer(stable_key: str, *, apartment: str = "푸른아파트") -> KepcoCustomer:
+def customer(
+    stable_key: str,
+    *,
+    apartment: str = "푸른아파트",
+    dong: str = "101",
+    ho: str = "1001",
+) -> KepcoCustomer:
     return KepcoCustomer(
         stable_key=stable_key,
         apartment_name=apartment,
-        dong="101",
-        ho="1001",
+        dong=dong,
+        ho=ho,
         contract_method="아파트(단일계약)",
         is_supported=True,
         _customer_number=RAW_CUSTOMER_SECRET,
@@ -424,6 +430,17 @@ async def test_user_success_then_customer_creates_private_entry(
 
 
 @pytest.mark.asyncio
+async def test_default_title_uses_normalized_selected_location() -> None:
+    FakeClient.customer_results = [(customer("key-1", dong="1001", ho="0101"),)]
+    flow = make_flow()
+
+    result = await create_entry(flow)
+
+    assert result["type"] == "create_entry"
+    assert result["title"] == "1001동 101호"
+
+
+@pytest.mark.asyncio
 async def test_save_password_true_stores_password() -> None:
     flow = make_flow()
 
@@ -437,6 +454,7 @@ async def test_save_password_true_stores_password() -> None:
 
 @pytest.mark.asyncio
 async def test_customer_labels_use_only_apartment_dong_ho() -> None:
+    FakeClient.customer_results = [(customer("key-1", dong="1001", ho="0101"),)]
     flow = make_flow()
 
     result = await reach_customer_step(flow)
@@ -445,7 +463,8 @@ async def test_customer_labels_use_only_apartment_dong_ho() -> None:
     assert data_schema is not None
     selector_obj = next(iter(data_schema.schema.values()))
     labels = str(selector_obj.config)
-    assert "푸른아파트 101동 1001호" in labels
+    assert "푸른아파트 1001동 101호" in labels
+    assert "0101호" not in labels
     assert RAW_CUSTOMER_SECRET not in labels
     assert RAW_HOUSE_SECRET not in labels
     assert "Member Secret" not in labels
@@ -467,6 +486,7 @@ async def test_multiple_customers_and_empty_selection_recovery(
     result = await flow.async_step_customer({CONF_SELECTED_CUSTOMERS: ["key-1", "key-2"]})
     assert result["type"] == "create_entry"
     assert result["data"][CONF_SELECTED_CUSTOMERS] == ["key-1", "key-2"]
+    assert result["title"] == "101동 1001호 외 1세대"
     assert patched_flow_dependencies[0].closed is True
 
 
@@ -767,6 +787,12 @@ def make_entry() -> FakeConfigEntry:
     )
 
 
+def test_config_flow_uses_current_entry_version() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    assert KepcoOnConfigFlow.VERSION == CONFIG_ENTRY_VERSION == 3
+
+
 @pytest.mark.asyncio
 async def test_options_flow_accepts_valid_values() -> None:
     from custom_components.kepco_on.config_flow import KepcoOnOptionsFlow
@@ -778,8 +804,6 @@ async def test_options_flow_accepts_valid_values() -> None:
     result = await flow.async_step_init(
         {
             OPT_POLLING_INTERVAL_HOURS: 12,
-            OPT_ENABLE_DETAILED_SENSORS: True,
-            OPT_ENABLE_CO2_ESTIMATE: True,
             OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
             OPT_HISTORY_MONTHS: 24,
         }
@@ -788,8 +812,6 @@ async def test_options_flow_accepts_valid_values() -> None:
     assert result["type"] == "create_entry"
     assert result["data"] == {
         OPT_POLLING_INTERVAL_HOURS: 12,
-        OPT_ENABLE_DETAILED_SENSORS: True,
-        OPT_ENABLE_CO2_ESTIMATE: True,
         OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
         OPT_HISTORY_MONTHS: 24,
     }
@@ -805,9 +827,7 @@ async def test_options_flow_rejects_invalid_values() -> None:
 
     valid = {
         OPT_POLLING_INTERVAL_HOURS: 6,
-        OPT_ENABLE_DETAILED_SENSORS: False,
-        OPT_ENABLE_CO2_ESTIMATE: False,
-        OPT_CO2_FACTOR_KG_PER_KWH: 0.459,
+        OPT_CO2_FACTOR_KG_PER_KWH: DEFAULT_CO2_FACTOR_KG_PER_KWH,
         OPT_HISTORY_MONTHS: 12,
     }
     for payload, error in (
@@ -842,14 +862,14 @@ async def test_options_flow_default_form_values() -> None:
     assert all("selected_customers" not in str(config) for config in selector_configs)
     defaults = [key.default() for key in schema]
     assert str(DEFAULT_POLLING_INTERVAL_HOURS) in defaults
-    assert 0.459 in defaults
+    assert DEFAULT_CO2_FACTOR_KG_PER_KWH in defaults
     co2_selector = next(
         value for key, value in schema.items() if key.schema == OPT_CO2_FACTOR_KG_PER_KWH
     )
     assert co2_selector.config["min"] == 0.001
 
 
-def test_options_schema_uses_string_default_for_select_when_only_toggles_change() -> None:
+def test_options_schema_uses_string_default_for_select_when_other_values_change() -> None:
     from custom_components.kepco_on.config_flow import KepcoOnOptionsFlow
 
     entry = make_entry()
@@ -858,14 +878,14 @@ def test_options_schema_uses_string_default_for_select_when_only_toggles_change(
 
     validated = flow._schema()(
         {
-            OPT_ENABLE_DETAILED_SENSORS: True,
-            OPT_ENABLE_CO2_ESTIMATE: True,
+            OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
+            OPT_HISTORY_MONTHS: 18,
         }
     )
 
     assert validated[OPT_POLLING_INTERVAL_HOURS] == "6"
-    assert validated[OPT_ENABLE_DETAILED_SENSORS] is True
-    assert validated[OPT_ENABLE_CO2_ESTIMATE] is True
+    assert validated[OPT_CO2_FACTOR_KG_PER_KWH] == 0.5
+    assert validated[OPT_HISTORY_MONTHS] == 18
 
 
 @pytest.mark.asyncio
@@ -893,6 +913,7 @@ async def test_reauth_success_updates_existing_entry_and_preserves_available_sel
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-1"]
     assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-1"]
     assert entry.data[CONF_SESSION_HANDOFF]["cookies"] == []
+    assert entry.title == "101동 1001호"
     assert fake_hass.config_entries.reloads == [entry.entry_id]
     assert patched_flow_dependencies[0].closed is True
 
@@ -920,6 +941,7 @@ async def test_reauth_entry_step_shows_password_form_and_success_without_saving_
     assert CONF_PASSWORD not in entry.data
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
     assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-2"]
+    assert entry.title == "101동 1001호"
     assert fake_hass.config_entries.reloads == [entry.entry_id]
 
 
@@ -1069,6 +1091,7 @@ async def test_reconfigure_updates_customer_selection_only() -> None:
     assert result["reason"] == "reconfigure_successful"
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
     assert entry.unique_id == account_hash("SERVER_USER")
+    assert entry.title == "102동 1002호"
     assert fake_hass.config_entries.reloads == [entry.entry_id]
 
 
@@ -1106,6 +1129,7 @@ async def test_reconfigure_loaded_entry_uses_live_customers_and_persists_selecte
     assert RAW_CUSTOMER_SECRET in rendered
     assert "CUST2" not in rendered
     assert entry.options == {OPT_POLLING_INTERVAL_HOURS: 12}
+    assert entry.title == "101동 1001호"
     assert fake_hass.config_entries.reloads == [entry.entry_id]
 
 
@@ -1277,9 +1301,7 @@ async def test_options_flow_completion_schedules_one_reload() -> None:
     result = await flow.async_step_init(
         {
             OPT_POLLING_INTERVAL_HOURS: "6",
-            OPT_ENABLE_DETAILED_SENSORS: True,
-            OPT_ENABLE_CO2_ESTIMATE: True,
-            OPT_CO2_FACTOR_KG_PER_KWH: "0.459",
+            OPT_CO2_FACTOR_KG_PER_KWH: str(DEFAULT_CO2_FACTOR_KG_PER_KWH),
             OPT_HISTORY_MONTHS: 18,
         }
     )

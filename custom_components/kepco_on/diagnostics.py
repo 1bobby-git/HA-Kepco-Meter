@@ -100,6 +100,8 @@ SAFE_BILL_FIELDS = (
     "charge",
     "current_meter_reading",
     "history",
+    "household_usage_kwh",
+    "common_usage_kwh",
     "last_year_usage_kwh",
     "meter_reading_day",
     "period_end",

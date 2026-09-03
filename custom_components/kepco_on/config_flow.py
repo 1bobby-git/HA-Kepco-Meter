@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -29,11 +29,11 @@ from .const import (
     CONF_SELECTED_CUSTOMERS,
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
+    CONFIG_ENTRY_VERSION,
+    DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DEFAULT_POLLING_INTERVAL_HOURS,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
-    OPT_ENABLE_CO2_ESTIMATE,
-    OPT_ENABLE_DETAILED_SENSORS,
     OPT_HISTORY_MONTHS,
     OPT_POLLING_INTERVAL_HOURS,
     POLLING_INTERVAL_HOURS,
@@ -50,6 +50,8 @@ from .exceptions import (
 from .models import (
     KepcoAccountSession,
     KepcoCustomer,
+    customer_location_name,
+    selected_customer_location_title,
     selected_customers,
     serialize_customer,
     stored_customers,
@@ -57,8 +59,6 @@ from .models import (
 )
 from .session_store import session_to_payload
 
-DEFAULT_TITLE = "한전ON"
-DEFAULT_CO2_FACTOR = 0.459
 DEFAULT_HISTORY_MONTHS = 12
 MIN_CO2_FACTOR = 0.001
 
@@ -103,7 +103,17 @@ def _account_uid_hash(user_id: str) -> str:
 
 
 def _customer_label(customer: KepcoCustomer) -> str:
-    return f"{customer.apartment_name} {customer.dong}동 {customer.ho}호"
+    if customer.is_house:
+        return f"{customer.apartment_name} ({customer.customer_number[:2]}-****)"
+    return f"{customer.apartment_name} {customer_location_name(customer)}"
+
+
+def _config_entry_title(entry_data: Mapping[str, Any], customers: Sequence[KepcoCustomer]) -> str:
+    """Return an explicit display name or the normalized selected location."""
+    display_name = entry_data.get(CONF_DISPLAY_NAME)
+    if isinstance(display_name, str) and (normalized := display_name.strip()):
+        return normalized
+    return selected_customer_location_title(customers)
 
 
 def _customer_options(customers: tuple[KepcoCustomer, ...]) -> list[selector.SelectOptionDict]:
@@ -196,7 +206,7 @@ async def _close_session(client_session: Any | None) -> None:
 class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle KEPCO ON config, reauth, and reconfigure flows."""
 
-    VERSION = 1
+    VERSION = CONFIG_ENTRY_VERSION
 
     def __init__(self) -> None:
         self._pending: PendingConfig | None = None
@@ -314,14 +324,12 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         pending = self._pending
+        selected_records = selected_customers(pending.customers, selected)
         data: dict[str, Any] = {
             CONF_USERNAME: pending.username,
             CONF_SAVE_PASSWORD: pending.save_password,
             CONF_ACCOUNT_UID_HASH: pending.account_uid_hash,
-            CONF_CUSTOMERS: [
-                serialize_customer(customer)
-                for customer in selected_customers(pending.customers, selected)
-            ],
+            CONF_CUSTOMERS: [serialize_customer(customer) for customer in selected_records],
             CONF_SELECTED_CUSTOMERS: selected,
             CONF_SESSION_HANDOFF: session_to_payload(pending.session),
         }
@@ -329,7 +337,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data[CONF_DISPLAY_NAME] = pending.display_name
         if pending.save_password:
             data[CONF_PASSWORD] = pending.password
-        title = pending.display_name or DEFAULT_TITLE
+        title = _config_entry_title(data, selected_records)
         await _close_session(pending.client_session)
         self._pending = None
         return self.async_create_entry(title=title, data=data)
@@ -408,11 +416,10 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         preserved = [key for key in current if key in new_keys]
         if not preserved and customers:
             preserved = [customers[0].stable_key]
+        selected_records = selected_customers(customers, preserved)
         data = dict(entry.data)
         data[CONF_ACCOUNT_UID_HASH] = account_uid_hash
-        data[CONF_CUSTOMERS] = [
-            serialize_customer(customer) for customer in selected_customers(customers, preserved)
-        ]
+        data[CONF_CUSTOMERS] = [serialize_customer(customer) for customer in selected_records]
         data[CONF_SELECTED_CUSTOMERS] = preserved
         data[CONF_SESSION_HANDOFF] = session_to_payload(session)
         if data.get(CONF_SAVE_PASSWORD):
@@ -422,6 +429,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         await _close_session(client_session)
         return self.async_update_reload_and_abort(
             entry,
+            title=_config_entry_title(data, selected_records),
             data=data,
             reason="reauth_successful",
         )
@@ -457,13 +465,13 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data_schema=_customer_schema(customers, current),
                 errors={"base": "invalid_selection"},
             )
+        selected_records = selected_customers(customers, selected)
         data = dict(entry.data)
-        data[CONF_CUSTOMERS] = [
-            serialize_customer(customer) for customer in selected_customers(customers, selected)
-        ]
+        data[CONF_CUSTOMERS] = [serialize_customer(customer) for customer in selected_records]
         data[CONF_SELECTED_CUSTOMERS] = selected
         return self.async_update_reload_and_abort(
             entry,
+            title=_config_entry_title(data, selected_records),
             data=data,
             reason="reconfigure_successful",
         )
@@ -546,17 +554,9 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
                         mode=selector.SelectSelectorMode.DROPDOWN,
                     )
                 ),
-                vol.Optional(
-                    OPT_ENABLE_DETAILED_SENSORS,
-                    default=options.get(OPT_ENABLE_DETAILED_SENSORS, False),
-                ): bool,
-                vol.Optional(
-                    OPT_ENABLE_CO2_ESTIMATE,
-                    default=options.get(OPT_ENABLE_CO2_ESTIMATE, False),
-                ): bool,
                 vol.Required(
                     OPT_CO2_FACTOR_KG_PER_KWH,
-                    default=options.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR),
+                    default=options.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH),
                 ): selector.NumberSelector(
                     selector.NumberSelectorConfig(
                         min=MIN_CO2_FACTOR,
@@ -593,7 +593,9 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
             return {}, "unknown"
         try:
             co2_factor = float(
-                Decimal(str(user_input.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR)))
+                Decimal(
+                    str(user_input.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH))
+                )
             )
         except InvalidOperation, ValueError:
             return {}, "invalid_co2_factor"
@@ -608,10 +610,6 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
         return (
             {
                 OPT_POLLING_INTERVAL_HOURS: interval,
-                OPT_ENABLE_DETAILED_SENSORS: bool(
-                    user_input.get(OPT_ENABLE_DETAILED_SENSORS, False)
-                ),
-                OPT_ENABLE_CO2_ESTIMATE: bool(user_input.get(OPT_ENABLE_CO2_ESTIMATE, False)),
                 OPT_CO2_FACTOR_KG_PER_KWH: co2_factor,
                 OPT_HISTORY_MONTHS: history_months,
             },

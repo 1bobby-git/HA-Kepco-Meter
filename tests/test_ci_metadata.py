@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import struct
 import subprocess
 import tomllib
@@ -39,6 +40,9 @@ ACTION_REFS = {
 }
 ALLOWED_FIXTURES = {
     "bill_202607.json",
+    "house_customer_list.json",
+    "house_main_chart.json",
+    "house_power_planner.json",
     "bill_latest.json",
     "customer_list_multiple.json",
     "customer_list_single.json",
@@ -90,6 +94,8 @@ FORBIDDEN_VALUE_PARTS = (
     "set-cookie",
 )
 SAFE_SYNTHETIC_FIXTURE_KEYS = {"apt_name", "apt_nm", "cust_no", "si_cust_no"}
+# 실제 KEPCO 응답 필드명(변경 불가)이지만 값은 YYYYMMDD 날짜라 개인정보가 아니다.
+SAFE_DATE_FIXTURE_KEYS = {"dc_user_chg_nm_ymd"}
 
 
 def load_yaml(path: Path) -> dict[str, Any]:
@@ -170,6 +176,10 @@ def scan_fixture(value: object, path: tuple[str, ...] = ()) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             normalized_key = str(key).replace("-", "_").lower()
+            if normalized_key in SAFE_DATE_FIXTURE_KEYS:
+                assert isinstance(item, str)
+                assert re.fullmatch(r"[0-9]{8}", item)
+                continue
             if normalized_key not in SAFE_SYNTHETIC_FIXTURE_KEYS:
                 assert normalized_key not in FORBIDDEN_KEYS
                 assert not any(part in normalized_key for part in FORBIDDEN_KEY_PARTS)
@@ -186,7 +196,7 @@ def scan_fixture(value: object, path: tuple[str, ...] = ()) -> None:
 def test_workflow_yaml_files_parse_with_github_on_key() -> None:
     workflows = {path.name: load_yaml(path) for path in WORKFLOWS.glob("*.yml")}
 
-    assert set(workflows) == {"tests.yml", "validate.yml"}
+    assert set(workflows) == {"release.yml", "tests.yml", "validate.yml"}
     for workflow in workflows.values():
         assert isinstance(workflow_on(workflow), dict)
 
@@ -247,6 +257,49 @@ def test_validate_workflow_runs_hacs_and_hassfest_required_checks() -> None:
     assert "continue-on-error" not in json.dumps(workflow)
 
 
+def test_release_workflow_waits_for_both_ci_workflows_and_publishes_hacs_archive() -> None:
+    workflow = load_yaml(WORKFLOWS / "release.yml")
+    source = workflow_text("release.yml")
+    triggers = workflow_on(workflow)
+    jobs = cast("dict[str, Any]", workflow["jobs"])
+    release_job = cast("dict[str, Any]", jobs["release"])
+    steps = run_steps(workflow, "release")
+
+    assert triggers == {
+        "workflow_run": {
+            "workflows": ["Tests"],
+            "types": ["completed"],
+            "branches": ["main"],
+        }
+    }
+    assert workflow["permissions"] == {"actions": "read", "contents": "write"}
+    assert workflow["concurrency"] == {
+        "group": "release-${{ github.event.workflow_run.head_sha }}",
+        "cancel-in-progress": False,
+    }
+    assert set(jobs) == {"release"}
+    assert release_job["runs-on"] == "ubuntu-24.04"
+    assert release_job["if"] == "github.event.workflow_run.conclusion == 'success'"
+    assert_pinned_action(source, steps, "actions/checkout")
+    assert cast("dict[str, Any]", steps[0]["with"]) == {
+        "ref": "${{ env.RELEASE_SHA }}",
+        "fetch-depth": 0,
+    }
+    assert "name: Validate" in source or 'run.get("name") == "Validate"' in source
+    assert "git archive" in source
+    assert "custom_components/kepco_on/" in source
+    assert "gh release create" in source
+    assert "--notes-file RELEASE_NOTES.md" in source
+    assert "pull_request_target" not in source
+    assert "continue-on-error" not in source
+
+    manifest = load_json(ROOT / "custom_components" / "kepco_on" / "manifest.json")
+    release_notes = (ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
+    assert release_notes.startswith(f"## 한전ON v{manifest['version']}\n")
+    assert "주택용 직접계약 호환성 개선" in release_notes
+    assert "주택용 파서 안정성 보강" in release_notes
+
+
 def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     manifest = load_json(ROOT / "custom_components" / "kepco_on" / "manifest.json")
     hacs = load_json(ROOT / "hacs.json")
@@ -255,7 +308,6 @@ def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     release_version = Version(cast("str", manifest["version"]))
 
     assert release_version == Version(cast("str", pyproject["project"]["version"]))
-    assert release_version == Version("0.1.1")
     assert release_version.is_prerelease is False
     assert release_version.is_devrelease is False
     assert manifest["requirements"] == []
@@ -265,14 +317,17 @@ def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
     assert package["devDependencies"] == {"playwright": "1.62.1"}
 
 
-def test_hacs_brand_icon_is_square_rgba_png() -> None:
+def test_hacs_brand_icon_is_square_transparent_png() -> None:
     icon = ROOT / "custom_components" / "kepco_on" / "brand" / "icon.png"
     data = icon.read_bytes()
 
     assert data.startswith(b"\x89PNG\r\n\x1a\n")
     assert data[12:16] == b"IHDR"
     assert struct.unpack(">II", data[16:24]) == (256, 256)
-    assert data[25] == 6  # PNG color type 6: truecolor with alpha
+    color_type = data[25]
+    assert color_type in {3, 6}  # indexed or truecolor with alpha
+    if color_type == 3:
+        assert b"tRNS" in data
 
 
 def test_test_requirements_include_yaml_parser_for_local_workflow_validation() -> None:

@@ -188,7 +188,7 @@ async def test_diagnostics_returns_whitelisted_summary_without_private_canaries(
 
     assert diagnostics == {
         "integration": {
-            "version": "0.1.1",
+            "version": "0.3.1",
             "home_assistant_version": "2026.8.0",
         },
         "config_entry": {
@@ -216,6 +216,8 @@ async def test_diagnostics_returns_whitelisted_summary_without_private_canaries(
                 "charge",
                 "current_meter_reading",
                 "history",
+                "household_usage_kwh",
+                "common_usage_kwh",
                 "last_year_usage_kwh",
                 "meter_reading_day",
                 "period_end",
