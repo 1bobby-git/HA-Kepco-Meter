@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-
 from custom_components.kepco_on.api import KepcoOnClient
 from custom_components.kepco_on.const import ENDPOINT_MAIN_CHART, ENDPOINT_POWER_PLANNER
 from custom_components.kepco_on.exceptions import (
@@ -139,9 +138,7 @@ async def test_house_bill_keeps_history_when_power_planner_has_no_values() -> No
         def account_uid_hash(self) -> str:
             return "ACCOUNT_HASH"
 
-    bill = await KepcoOnClient(cast("Any", Auth())).async_get_bill(
-        _house_customer(change_ymd="")
-    )
+    bill = await KepcoOnClient(cast("Any", Auth())).async_get_bill(_house_customer(change_ymd=""))
 
     assert bill.bill_month == "202608"
     assert bill.current_period_usage_kwh is None
