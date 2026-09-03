@@ -1,6 +1,6 @@
 <!-- project-branding:start -->
 <p align="center">
-  <img src="https://raw.githubusercontent.com/1bobby-git/brands/master/custom_integrations/kepco_on/logo.png" alt="한전ON 로고" width="240">
+  <img src="https://raw.githubusercontent.com/1bobby-git/brands/master/custom_integrations/kepco_on/logo%402x.png" alt="한전ON 로고" width="420">
 </p>
 <p align="center">
   <a href="https://github.com/1bobby-git/HA-Kepco-Meter/stargazers">
