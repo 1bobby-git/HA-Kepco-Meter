@@ -108,8 +108,8 @@ def parse_customers(payload: dict[str, object], account_uid_hash: str) -> tuple[
     for index, row in enumerate(rows):
         contract_method = _optional_str(row, "cntrMthdCd") or ""
         display_index = index + 1
-        if "CUST_NO" not in row and contract_method.startswith(SUPPORTED_HOUSE_CONTRACT_PREFIX):
-            # 주택용 직접계약: 목록 row에 CUST_NO가 없고 SI_CUST_NO가 고객번호다.
+        if contract_method.startswith(SUPPORTED_HOUSE_CONTRACT_PREFIX):
+            # 주택용 직접계약은 응답에 CUST_NO가 함께 있어도 SI_CUST_NO를 기준으로 식별한다.
             customer_number = _required_str(row, "SI_CUST_NO")
             stable_key = _stable_customer_key(account_uid_hash, customer_number, customer_number)
             customers.append(
