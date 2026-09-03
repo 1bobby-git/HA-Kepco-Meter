@@ -8,8 +8,8 @@ import pytest
 from custom_components.kepco_on.const import CONF_CUSTOMERS, CONF_SELECTED_CUSTOMERS
 from custom_components.kepco_on.models import (
     KepcoAccountSession,
-    KepcoCoordinatorData,
     KepcoCookie,
+    KepcoCoordinatorData,
     KepcoCustomer,
     customer_location_name,
     selected_customer_location_title,
