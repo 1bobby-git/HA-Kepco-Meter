@@ -177,7 +177,8 @@ def scan_fixture(value: object, path: tuple[str, ...] = ()) -> None:
         for key, item in value.items():
             normalized_key = str(key).replace("-", "_").lower()
             if normalized_key in SAFE_DATE_FIXTURE_KEYS:
-                assert isinstance(item, str) and re.fullmatch(r"[0-9]{8}", item)
+                assert isinstance(item, str)
+                assert re.fullmatch(r"[0-9]{8}", item)
                 continue
             if normalized_key not in SAFE_SYNTHETIC_FIXTURE_KEYS:
                 assert normalized_key not in FORBIDDEN_KEYS
@@ -293,9 +294,9 @@ def test_release_workflow_waits_for_both_ci_workflows_and_publishes_hacs_archive
     assert "continue-on-error" not in source
 
     release_notes = (ROOT / "RELEASE_NOTES.md").read_text(encoding="utf-8")
-    assert release_notes.startswith("## 한전ON v0.2.4\n")
-    assert "전기요금 계" in release_notes
-    assert "접두어" in release_notes
+    assert release_notes.startswith("## 한전ON v0.3.1\n")
+    assert "주택용 직접계약 지원" in release_notes
+    assert "파워플래너 사용량 센서 추가" in release_notes
 
 
 def test_release_metadata_versions_and_runtime_dependencies_are_valid() -> None:
