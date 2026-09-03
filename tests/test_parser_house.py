@@ -38,6 +38,18 @@ def test_parse_customers_house_contract() -> None:
     assert customer.apartment_name == "주택용/3kW"
 
 
+def test_parse_customers_house_with_cust_no_still_uses_si_cust_no() -> None:
+    payload = _load("house_customer_list.json")
+    rows = cast("list[dict[str, object]]", payload["dlt_myPageAppendList"])
+    rows[0]["CUST_NO"] = "IGNORED_APARTMENT_STYLE_NUMBER"
+
+    customer = parse_customers(payload, "uidhash")[0]
+
+    assert customer.is_house is True
+    assert customer.customer_number == "TEST_SI_CUST_001"
+    assert customer.house_contract_number == "TEST_SI_CUST_001"
+
+
 def test_parse_customers_house_without_si_cust_no_raises() -> None:
     payload = _load("house_customer_list.json")
     rows = payload.get("dlt_myPageAppendList")
