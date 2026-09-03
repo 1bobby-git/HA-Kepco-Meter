@@ -302,6 +302,22 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
         value_fn=_usage("last_year_usage_kwh"),
     ),
+    KepcoSensorEntityDescription(
+        key="current_period_usage",
+        translation_key="current_period_usage",
+        device_group=KepcoDeviceGroup.METER_USAGE,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        value_fn=lambda bill, options: bill.current_period_usage_kwh,
+    ),
+    KepcoSensorEntityDescription(
+        key="predicted_period_usage",
+        translation_key="predicted_period_usage",
+        device_group=KepcoDeviceGroup.METER_USAGE,
+        native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
+        device_class=SensorDeviceClass.ENERGY,
+        value_fn=lambda bill, options: bill.predicted_period_usage_kwh,
+    ),
 )
 
 ELECTRICITY_CHARGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (

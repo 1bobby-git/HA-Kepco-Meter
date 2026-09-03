@@ -56,7 +56,7 @@ def test_manifest_matches_integration_contract() -> None:
         "iot_class": "cloud_polling",
         "issue_tracker": "https://github.com/1bobby-git/HA-Kepco-Meter/issues",
         "requirements": [],
-        "version": "0.2.4",
+        "version": "0.3.1",
     }
 
 
@@ -119,7 +119,7 @@ def test_gitignore_blocks_capture_and_secret_artifacts() -> None:
 def test_constants_are_fixed_and_capture_safe() -> None:
     assert const.DOMAIN == "kepco_on"
     assert const.NAME == "KEPCO ON"
-    assert const.VERSION == "0.2.4"
+    assert const.VERSION == "0.3.1"
     assert const.CONFIG_ENTRY_VERSION == 3
     assert const.BASE_URL == "https://online.kepco.co.kr"
     assert const.PAGE_URL == "https://online.kepco.co.kr/MYM001D00"

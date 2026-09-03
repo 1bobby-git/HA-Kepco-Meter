@@ -67,6 +67,17 @@ class KepcoCustomer:
     is_supported: bool
     _customer_number: str = field(repr=False)
     _house_contract_number: str = field(repr=False)
+    _change_ymd: str = field(default="", repr=False)
+
+    @property
+    def is_house(self) -> bool:
+        """Return True for 주택용 direct contracts (non-apartment)."""
+        return self.contract_method.startswith("주택용")
+
+    @property
+    def change_ymd(self) -> str:
+        """Return the contract change date (YYYYMMDD) if known."""
+        return self._change_ymd
 
     @property
     def customer_number(self) -> str:
@@ -89,6 +100,8 @@ def _normalized_location_component(value: str) -> str:
 
 def customer_location_name(customer: KepcoCustomer) -> str:
     """Return a normalized, apartment-name-free customer location."""
+    if customer.is_house:
+        return customer.apartment_name
     dong = _normalized_location_component(customer.dong)
     ho = _normalized_location_component(customer.ho)
     return f"{dong}동 {ho}호"
@@ -149,6 +162,8 @@ class KepcoBill:
     amount_krw: int | None = None
     charge: KepcoChargeBreakdown = field(default_factory=KepcoChargeBreakdown)
     history: tuple[KepcoUsageHistoryPoint, ...] = ()
+    current_period_usage_kwh: float | None = None
+    predicted_period_usage_kwh: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +216,7 @@ def serialize_customer(customer: KepcoCustomer) -> dict[str, Any]:
         DATA_IS_SUPPORTED: customer.is_supported,
         DATA_CUSTOMER_NUMBER: customer.customer_number,
         DATA_HOUSE_CONTRACT_NUMBER: customer.house_contract_number,
+        "change_ymd": customer.change_ymd,
     }
 
 
@@ -225,6 +241,7 @@ def deserialize_customer(payload: Mapping[str, Any]) -> KepcoCustomer:
         is_supported=is_supported,
         _customer_number=_require_nonempty_str(payload, DATA_CUSTOMER_NUMBER),
         _house_contract_number=_require_nonempty_str(payload, DATA_HOUSE_CONTRACT_NUMBER),
+        _change_ymd=str(payload.get("change_ymd") or ""),
     )
 
 

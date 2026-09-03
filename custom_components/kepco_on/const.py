@@ -4,7 +4,7 @@ from homeassistant.const import CONF_PASSWORD, Platform
 
 DOMAIN = "kepco_on"
 NAME = "KEPCO ON"
-VERSION = "0.2.4"
+VERSION = "0.3.1"
 CONFIG_ENTRY_VERSION = 3
 
 BASE_URL = "https://online.kepco.co.kr"
@@ -18,6 +18,8 @@ ENDPOINT_IS_CORP = "/isCorp"
 ENDPOINT_MYPAGE_CUST_NO_LIST = "/my/indi/info/myPageCustNoList"
 ENDPOINT_CUST_NO_LIST = "/my/indi/info/custNoList"
 ENDPOINT_APT_BILL_DETAIL = "/my/charge/pay/aptBillDetail"
+ENDPOINT_MAIN_CHART = "/my/memo/mainChart"
+ENDPOINT_POWER_PLANNER = "/my/memo/powerPlanner"
 
 POLLING_INTERVAL_HOURS = (1, 3, 6, 12, 24)
 DEFAULT_POLLING_INTERVAL_HOURS = 6
@@ -82,7 +84,9 @@ __all__ = [
     "ENDPOINT_FIRST_LOGIN_CHECK",
     "ENDPOINT_IS_CORP",
     "ENDPOINT_LOGIN_INDI",
+    "ENDPOINT_MAIN_CHART",
     "ENDPOINT_MYPAGE_CUST_NO_LIST",
+    "ENDPOINT_POWER_PLANNER",
     "ENDPOINT_SESSION_CHECK",
     "ENDPOINT_SSO_CHECK",
     "NAME",

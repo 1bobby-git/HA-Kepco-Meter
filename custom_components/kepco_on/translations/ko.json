@@ -197,22 +197,22 @@
         "name": "전년동월 사용량"
       },
       "electricity_subtotal": {
-        "name": "전기요금\u00a0계"
+        "name": "전기요금 계"
       },
       "base_charge": {
-        "name": "전기요금\u00a0상세 기본요금"
+        "name": "전기요금 상세 기본요금"
       },
       "energy_charge": {
-        "name": "전기요금\u00a0상세 전력량요금"
+        "name": "전기요금 상세 전력량요금"
       },
       "climate_environment_charge": {
-        "name": "전기요금\u00a0상세 기후환경요금"
+        "name": "전기요금 상세 기후환경요금"
       },
       "fuel_adjustment_charge": {
-        "name": "전기요금\u00a0상세 연료비조정요금"
+        "name": "전기요금 상세 연료비조정요금"
       },
       "child_discount": {
-        "name": "전기요금\u00a0상세 출산가구할인요금"
+        "name": "전기요금 상세 출산가구할인요금"
       },
       "vat": {
         "name": "부가가치세"
@@ -243,6 +243,12 @@
       },
       "last_year_same_month_co2": {
         "name": "전년동월 배출량"
+      },
+      "current_period_usage": {
+        "name": "현재 검침기간 누적 사용량"
+      },
+      "predicted_period_usage": {
+        "name": "한전 예측 사용량"
       }
     }
   }

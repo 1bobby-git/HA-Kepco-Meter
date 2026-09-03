@@ -285,14 +285,14 @@ async def test_sensors_have_exact_five_device_groups_counts_values_and_privacy()
     entities = await setup_entities()
     sensors = by_key(entities)
 
-    assert len(entities) == 32
-    assert len(sensors) == 32
+    assert len(entities) == 34
+    assert len(sensors) == 34
     assert {
         group: sum(entity.entity_description.device_group is group for entity in entities)
         for group in KepcoDeviceGroup
     } == {
         KepcoDeviceGroup.MONTHLY_USAGE: 6,
-        KepcoDeviceGroup.METER_USAGE: 10,
+        KepcoDeviceGroup.METER_USAGE: 12,
         KepcoDeviceGroup.ELECTRICITY_CHARGE: 10,
         KepcoDeviceGroup.NEIGHBOR_COMPARISON: 3,
         KepcoDeviceGroup.GREENHOUSE_GAS: 3,
@@ -598,8 +598,8 @@ async def test_missing_bill_and_partial_failure_availability_are_isolated() -> N
     successful = [entity for entity in entities if entity.unique_id.startswith("cust-a_")]
     failed = [entity for entity in entities if entity.unique_id.startswith("cust-b_")]
 
-    assert len(successful) == 32
-    assert len(failed) == 32
+    assert len(successful) == 34
+    assert len(failed) == 34
     assert {entity.available for entity in successful} == {True}
     assert {entity.available for entity in failed} == {False}
     assert {entity.native_value for entity in failed} == {None}
@@ -723,7 +723,7 @@ async def test_cleanup_removes_stale_and_removed_entities_and_reenables_legacy_d
 
     entities = await setup_entities(use_real_registry_cleanup=True)
 
-    assert len(entities) == 32
+    assert len(entities) == 34
     assert entity_registry.removed == [
         "sensor.stale_monthly",
         "sensor.removed_billing_month",
@@ -791,6 +791,8 @@ def test_entity_translations_have_json_parity_and_requested_korean_names() -> No
         "common_usage",
         "previous_month_usage",
         "last_year_same_month_usage",
+        "current_period_usage",
+        "predicted_period_usage",
         "electricity_subtotal",
         "base_charge",
         "energy_charge",
@@ -824,6 +826,8 @@ def test_entity_translations_have_json_parity_and_requested_korean_names() -> No
         "common_usage": {"name": "당월 공용 사용량"},
         "previous_month_usage": {"name": "전월 사용량"},
         "last_year_same_month_usage": {"name": "전년동월 사용량"},
+        "current_period_usage": {"name": "현재 검침기간 누적 사용량"},
+        "predicted_period_usage": {"name": "한전 예측 사용량"},
         "electricity_subtotal": {"name": "전기요금\u00a0계"},
         "base_charge": {"name": "전기요금\u00a0상세 기본요금"},
         "energy_charge": {"name": "전기요금\u00a0상세 전력량요금"},
