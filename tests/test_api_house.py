@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-
 from custom_components.kepco_on.api import KepcoOnClient
 from custom_components.kepco_on.const import ENDPOINT_MAIN_CHART, ENDPOINT_POWER_PLANNER
 from custom_components.kepco_on.exceptions import (
