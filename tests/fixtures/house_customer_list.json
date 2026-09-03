@@ -4,7 +4,7 @@
     {
       "DC_L_CNTR_PWR": "3",
       "DC_L_CNTR_KIND": "주택용전력",
-      "DC_L_METER_NO": "0000022928",
+      "DC_L_METER_NO": "0000000001",
       "cntrMthdCd": "주택용/3kW",
       "SI_CUST_NO": "TEST_SI_CUST_001",
       "DC_USER_CHG_NM_YMD": "20260409"
