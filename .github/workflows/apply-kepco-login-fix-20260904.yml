@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 20
 
     steps:
-      - name: Check out staged patch
+      - name: Check out staged transformer
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # source: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
@@ -29,19 +29,21 @@ jobs:
           fetch-depth: 0
           path: repo
 
-      - name: Reconstruct and apply staged patch
+      - name: Apply deterministic source transformation
         shell: bash
         run: |
           set -euo pipefail
-          cat patch-source/.github/diagnostics/kepco-login-fix.b64.* \
-            | base64 --decode > /tmp/kepco-login-fix.patch
-          sha256sum /tmp/kepco-login-fix.patch
-          wc -c /tmp/kepco-login-fix.patch
+          base64 --decode patch-source/.github/diagnostics/apply-kepco-login-fix.py.gz.b64 \
+            | gzip -dc > /tmp/apply-kepco-login-fix.py
+          echo "bed8711b49392bcab1756e6d61798daca83fb0bf9b11453cd25ea665ffd63e53  /tmp/apply-kepco-login-fix.py" \
+            | sha256sum --check --strict
           cd repo
           git checkout -B fix/kepco-login-response-compat-20260904
-          git apply --check /tmp/kepco-login-fix.patch
-          git apply /tmp/kepco-login-fix.patch
+          python /tmp/apply-kepco-login-fix.py
           git diff --check
+          git diff > /tmp/kepco-login-fix.patch
+          echo "dd6d1289b9d3b7a85d5dfbd65ae1cb605ed9ee6535f2520d4c58543e23dffada  /tmp/kepco-login-fix.patch" \
+            | sha256sum --check --strict
 
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # source: actions/setup-python@v7
