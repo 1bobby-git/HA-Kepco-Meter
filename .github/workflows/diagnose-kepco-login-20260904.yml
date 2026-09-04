@@ -1,0 +1,159 @@
+name: Diagnose current KEPCO login protocol
+
+on:
+  push:
+    branches:
+      - diagnostic/kepco-login-20260904
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Probe public bootstrap and invalid-login response safely
+        shell: bash
+        run: |
+          python - <<'PY'
+          from __future__ import annotations
+
+          import json
+          import ssl
+          from http.cookiejar import CookieJar
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlparse
+          from urllib.request import HTTPCookieProcessor, HTTPSHandler, Request, build_opener
+
+          BASE_URL = "https://online.kepco.co.kr"
+          BOOTSTRAP_URL = f"{BASE_URL}/MYM001D00"
+          LOGIN_URL = f"{BASE_URL}/cyb/me/login/indi/api"
+          USER_AGENT = "HomeAssistant-KEPCO-ON/0.3.2 diagnostic-probe"
+          TIMEOUT = 30
+
+          cookie_jar = CookieJar()
+          opener = build_opener(
+              HTTPCookieProcessor(cookie_jar),
+              HTTPSHandler(context=ssl.create_default_context()),
+          )
+
+          def value_shape(value: object) -> object:
+              if value is None:
+                  return "null"
+              if isinstance(value, bool):
+                  return "bool"
+              if isinstance(value, str):
+                  return "str:nonempty" if value else "str:empty"
+              if isinstance(value, (int, float)):
+                  return "number"
+              if isinstance(value, list):
+                  return {
+                      "type": "list",
+                      "length": len(value),
+                      "items": [value_shape(item) for item in value[:3]],
+                  }
+              if isinstance(value, dict):
+                  return {
+                      "type": "object",
+                      "keys": {
+                          str(key): value_shape(child)
+                          for key, child in sorted(value.items(), key=lambda item: str(item[0]))
+                      },
+                  }
+              return type(value).__name__
+
+          def safe_request(request: Request) -> tuple[int | None, str, bytes, str | None]:
+              try:
+                  with opener.open(request, timeout=TIMEOUT) as response:
+                      return (
+                          response.status,
+                          response.headers.get("Content-Type", ""),
+                          response.read(),
+                          response.geturl(),
+                      )
+              except HTTPError as err:
+                  return (
+                      err.code,
+                      err.headers.get("Content-Type", "") if err.headers else "",
+                      err.read(),
+                      err.geturl(),
+                  )
+              except (URLError, TimeoutError, OSError) as err:
+                  print(f"KEPCO_DIAGNOSTIC transport_error={type(err).__name__}")
+                  return None, "", b"", None
+
+          bootstrap_request = Request(
+              BOOTSTRAP_URL,
+              method="GET",
+              headers={
+                  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                  "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5",
+                  "User-Agent": USER_AGENT,
+              },
+          )
+          bootstrap_status, bootstrap_type, bootstrap_body, bootstrap_final = safe_request(
+              bootstrap_request
+          )
+          print(
+              "KEPCO_DIAGNOSTIC bootstrap="
+              + json.dumps(
+                  {
+                      "status": bootstrap_status,
+                      "content_type": bootstrap_type,
+                      "body_bytes": len(bootstrap_body),
+                      "final_path": urlparse(bootstrap_final).path if bootstrap_final else None,
+                      "cookie_names": sorted({cookie.name for cookie in cookie_jar}),
+                  },
+                  ensure_ascii=False,
+                  sort_keys=True,
+              )
+          )
+
+          login_body = json.dumps(
+              {
+                  "dma_loginData": {
+                      "userId": "__ha_protocol_probe_invalid_user__",
+                      "pwdVal": "__ha_protocol_probe_invalid_password__",
+                      "autoFlag": "N",
+                  }
+              },
+              ensure_ascii=False,
+              separators=(",", ":"),
+          ).encode("utf-8")
+          login_request = Request(
+              LOGIN_URL,
+              data=login_body,
+              method="POST",
+              headers={
+                  "Accept": "application/json",
+                  "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5",
+                  "Content-Type": 'application/json; charset="UTF-8"',
+                  "Origin": BASE_URL,
+                  "Referer": BOOTSTRAP_URL,
+                  "User-Agent": USER_AGENT,
+                  "submissionid": "mf_login_popup_wframe_sbm_submission4",
+              },
+          )
+          login_status, login_type, login_response, login_final = safe_request(login_request)
+          login_summary: dict[str, object] = {
+              "status": login_status,
+              "content_type": login_type,
+              "body_bytes": len(login_response),
+              "final_path": urlparse(login_final).path if login_final else None,
+              "cookie_names": sorted({cookie.name for cookie in cookie_jar}),
+          }
+          if login_response:
+              try:
+                  parsed = json.loads(login_response.decode("utf-8-sig"))
+              except (UnicodeDecodeError, json.JSONDecodeError):
+                  login_summary["body_shape"] = "non_json"
+              else:
+                  login_summary["body_shape"] = value_shape(parsed)
+          else:
+              login_summary["body_shape"] = "empty"
+          print(
+              "KEPCO_DIAGNOSTIC login="
+              + json.dumps(login_summary, ensure_ascii=False, sort_keys=True)
+          )
+          PY
