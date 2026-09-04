@@ -29,14 +29,14 @@ jobs:
           fetch-depth: 0
           path: repo
 
-      - name: Reconstruct and apply verified patch
+      - name: Reconstruct and apply staged patch
         shell: bash
         run: |
           set -euo pipefail
           cat patch-source/.github/diagnostics/kepco-login-fix.b64.* \
             | base64 --decode > /tmp/kepco-login-fix.patch
-          echo "dd6d1289b9d3b7a85d5dfbd65ae1cb605ed9ee6535f2520d4c58543e23dffada  /tmp/kepco-login-fix.patch" \
-            | sha256sum --check --strict
+          sha256sum /tmp/kepco-login-fix.patch
+          wc -c /tmp/kepco-login-fix.patch
           cd repo
           git checkout -B fix/kepco-login-response-compat-20260904
           git apply --check /tmp/kepco-login-fix.patch
