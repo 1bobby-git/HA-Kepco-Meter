@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           base64 --decode patch-source/.github/diagnostics/apply-kepco-login-fix.py.gz.b64 \
             | gzip -dc > /tmp/apply-kepco-login-fix.py
-          echo "bed8711b49392bcab1756e6d61798daca83fb0bf9b11453cd25ea665ffd63e53  /tmp/apply-kepco-login-fix.py" \
+          echo "7126631b406a41205e9e46daf95363bc439116b3416d3b3a51497bfb1534d261  /tmp/apply-kepco-login-fix.py" \
             | sha256sum --check --strict
           cd repo
           git checkout -B fix/kepco-login-response-compat-20260904
