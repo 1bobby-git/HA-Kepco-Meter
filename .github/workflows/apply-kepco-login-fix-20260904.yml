@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           base64 --decode patch-source/.github/diagnostics/apply-kepco-login-fix.py.gz.b64 \
             | gzip -dc > /tmp/apply-kepco-login-fix.py
-          echo "7126631b406a41205e9e46daf95363bc439116b3416d3b3a51497bfb1534d261  /tmp/apply-kepco-login-fix.py" \
+          echo "d640b155706e40eddff0de26b4c67c52be14e37c11de8523d2a98c61ea8917d2  /tmp/apply-kepco-login-fix.py" \
             | sha256sum --check --strict
           cd repo
           git checkout -B fix/kepco-login-response-compat-20260904
@@ -101,7 +101,36 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add -- \
+            README.md \
+            RELEASE_NOTES.md \
+            custom_components/kepco_on/auth.py \
+            custom_components/kepco_on/config_flow.py \
+            custom_components/kepco_on/const.py \
+            custom_components/kepco_on/manifest.json \
+            custom_components/kepco_on/strings.json \
+            custom_components/kepco_on/translations/en.json \
+            custom_components/kepco_on/translations/ko.json \
+            pyproject.toml \
+            tests/test_auth.py \
+            tests/test_config_flow.py \
+            tests/test_version_metadata.py
+          expected_files="$(printf '%s\n' \
+            README.md \
+            RELEASE_NOTES.md \
+            custom_components/kepco_on/auth.py \
+            custom_components/kepco_on/config_flow.py \
+            custom_components/kepco_on/const.py \
+            custom_components/kepco_on/manifest.json \
+            custom_components/kepco_on/strings.json \
+            custom_components/kepco_on/translations/en.json \
+            custom_components/kepco_on/translations/ko.json \
+            pyproject.toml \
+            tests/test_auth.py \
+            tests/test_config_flow.py \
+            tests/test_version_metadata.py | sort)"
+          actual_files="$(git diff --cached --name-only | sort)"
+          test "$actual_files" = "$expected_files"
           git commit -m "fix: tolerate optional KEPCO login token"
           git archive \
             --format=zip \
