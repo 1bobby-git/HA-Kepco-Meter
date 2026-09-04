@@ -195,7 +195,7 @@ async def test_login_bootstraps_browser_session_before_sending_credentials() -> 
         assert request.path == "/MYM001D00"
         assert "text/html" in request.headers["Accept"]
         assert request.headers["Referer"] == "https://online.kepco.co.kr/"
-        assert request.headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.3.1"
+        assert request.headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.3.3"
         assert "submissionid" not in request.headers
         assert "refreshToken" not in request.headers
         return html_response()
@@ -294,11 +294,37 @@ async def test_login_result_no_raises_safe_auth_error() -> None:
 
 
 @pytest.mark.asyncio
+async def test_login_accepts_success_response_without_optional_token() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/cyb/me/login/indi/api",
+        "post",
+        response=json_response(
+            {
+                "dma_loginData2": {
+                    "result": "YES",
+                    "refreshToken": REFRESH_SECRET,
+                    "userId": "USER_ID_SECRET_CANARY",
+                    "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+                }
+            }
+        ),
+    )
+    store = MemorySessionStore()
+    async with auth_context(server, store) as auth:
+        session = await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+
+    assert session.token is None
+    assert session.refresh_token == REFRESH_SECRET
+    assert store.saved == [session]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "payload",
     [
         {"result": "YES", "token": "TOKEN_SECRET_CANARY", "userId": "user", "mbrsNm": "member"},
-        {"result": "YES", "refreshToken": REFRESH_SECRET, "userId": "user", "mbrsNm": "member"},
         {
             "result": "YES",
             "token": "TOKEN_SECRET_CANARY",
@@ -314,7 +340,7 @@ async def test_login_result_no_raises_safe_auth_error() -> None:
         {"result": "MFA_REQUIRED", "challenge": "sms"},
     ],
 )
-async def test_login_unknown_or_missing_token_schema_raises_protocol_error(
+async def test_login_unknown_or_missing_required_schema_raises_protocol_error(
     payload: Mapping[str, object],
 ) -> None:
     server = ResponsesMockServer()
@@ -430,7 +456,6 @@ async def test_validate_session_expired_response_returns_false_without_saving() 
 @pytest.mark.parametrize(
     "payload",
     [
-        {"result": True, "refreshToken": "REFRESH_ROTATED", "userId": "user", "mbrsNm": "member"},
         {"result": True, "token": "TOKEN_ROTATED", "userId": "user", "mbrsNm": "member"},
         {
             "result": True,
@@ -447,7 +472,7 @@ async def test_validate_session_expired_response_returns_false_without_saving() 
         {"result": "MFA_REQUIRED", "challenge": "sms"},
     ],
 )
-async def test_validate_unknown_or_missing_token_schema_raises_protocol_error(
+async def test_validate_unknown_or_missing_required_schema_raises_protocol_error(
     payload: Mapping[str, object],
 ) -> None:
     server = ResponsesMockServer()
@@ -460,6 +485,33 @@ async def test_validate_unknown_or_missing_token_schema_raises_protocol_error(
         assert_no_secret(str(raised.value))
 
     assert store.saved == []
+
+
+@pytest.mark.asyncio
+async def test_validate_session_preserves_token_when_response_omits_it() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=json_response(
+            {
+                "result": True,
+                "refreshToken": "REFRESH_ROTATED",
+                "userId": "USER_ID_SECRET_CANARY",
+                "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+            }
+        ),
+    )
+    store = MemorySessionStore(make_session())
+    async with auth_context(server, store) as auth:
+        await auth.async_restore_session()
+        assert await auth.async_validate_session() is True
+
+    assert auth.current_session is not None
+    assert auth.current_session.refresh_token == "REFRESH_ROTATED"
+    assert auth.current_session.token == "TOKEN_SECRET_CANARY"
+    assert store.saved[-1] == auth.current_session
 
 
 @pytest.mark.asyncio
