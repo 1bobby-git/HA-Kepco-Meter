@@ -16,7 +16,7 @@ jobs:
       - name: Probe public bootstrap and invalid-login response safely
         shell: bash
         run: |
-          python - <<'PY'
+          python - <<'PY' | tee kepco-diagnostic.txt
           from __future__ import annotations
 
           import json
@@ -157,3 +157,10 @@ jobs:
               + json.dumps(login_summary, ensure_ascii=False, sort_keys=True)
           )
           PY
+
+      - name: Upload safe diagnostic output
+        uses: actions/upload-artifact@v4
+        with:
+          name: kepco-login-protocol-diagnostic
+          path: kepco-diagnostic.txt
+          retention-days: 1
