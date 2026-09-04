@@ -1,0 +1,93 @@
+name: Classify current KEPCO invalid-login result
+
+on:
+  push:
+    branches:
+      - diagnostic/kepco-login-20260904
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Classify invalid-login result without credentials
+        shell: bash
+        run: |
+          python - <<'PY' | tee kepco-login-result.txt
+          import json
+          import ssl
+          from http.cookiejar import CookieJar
+          from urllib.error import HTTPError
+          from urllib.request import HTTPCookieProcessor, HTTPSHandler, Request, build_opener
+
+          base = "https://online.kepco.co.kr"
+          page = f"{base}/MYM001D00"
+          jar = CookieJar()
+          opener = build_opener(
+              HTTPCookieProcessor(jar),
+              HTTPSHandler(context=ssl.create_default_context()),
+          )
+          headers = {
+              "Accept-Language": "ko-KR,ko;q=0.9,en;q=0.5",
+              "User-Agent": "HomeAssistant-KEPCO-ON/0.3.2 diagnostic-probe",
+          }
+          opener.open(Request(page, headers={**headers, "Accept": "text/html"}), timeout=30).read()
+          body = json.dumps(
+              {
+                  "dma_loginData": {
+                      "userId": "__ha_protocol_probe_invalid_user__",
+                      "pwdVal": "__ha_protocol_probe_invalid_password__",
+                      "autoFlag": "N",
+                  }
+              },
+              separators=(",", ":"),
+          ).encode()
+          request = Request(
+              f"{base}/cyb/me/login/indi/api",
+              data=body,
+              method="POST",
+              headers={
+                  **headers,
+                  "Accept": "application/json",
+                  "Content-Type": "application/json; charset=UTF-8",
+                  "Origin": f"{base}/",
+                  "Referer": page,
+                  "submissionid": "mf_login_popup_wframe_sbm_submission4",
+              },
+          )
+          try:
+              response = opener.open(request, timeout=30)
+              raw = response.read()
+              status = response.status
+          except HTTPError as error:
+              raw = error.read()
+              status = error.code
+          parsed = json.loads(raw.decode("utf-8-sig"))
+          wrapped = parsed.get("dma_loginData2", parsed) if isinstance(parsed, dict) else {}
+          result = wrapped.get("result") if isinstance(wrapped, dict) else None
+          error_code = wrapped.get("errorCode") if isinstance(wrapped, dict) else None
+          allowed_results = {"NO", "YES", "N", "Y", "FAIL", "FAILED", "SUCCESS", "ERROR", "0", "1"}
+          print(
+              json.dumps(
+                  {
+                      "status": status,
+                      "result_marker": result if isinstance(result, str) and result in allowed_results else "other",
+                      "result_type": type(result).__name__,
+                      "has_error_code": isinstance(error_code, str) and bool(error_code),
+                      "has_error_message": isinstance(wrapped.get("errorMessage"), str) and bool(wrapped.get("errorMessage")),
+                      "has_refresh_token": isinstance(wrapped.get("refreshToken"), str) and bool(wrapped.get("refreshToken")),
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
+
+      - name: Upload safe result marker
+        uses: actions/upload-artifact@v4
+        with:
+          name: kepco-login-result-marker
+          path: kepco-login-result.txt
+          retention-days: 1
