@@ -1,0 +1,36 @@
+name: Export current source for verified patch
+
+on:
+  push:
+    branches:
+      - diagnostic/kepco-login-20260904
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out exact main snapshot
+        uses: actions/checkout@v4
+        with:
+          ref: 552425f32202eec1cf161685ddeede82f221c64b
+
+      - name: Upload source snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: kepco-fix-source
+          path: |
+            custom_components/kepco_on/auth.py
+            custom_components/kepco_on/config_flow.py
+            custom_components/kepco_on/const.py
+            custom_components/kepco_on/strings.json
+            custom_components/kepco_on/translations
+            custom_components/kepco_on/manifest.json
+            tests/test_auth.py
+            tests/test_config_flow.py
+            README.md
+            pyproject.toml
+          retention-days: 1
