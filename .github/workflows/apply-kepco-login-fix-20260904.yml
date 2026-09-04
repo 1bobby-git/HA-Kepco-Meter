@@ -40,6 +40,30 @@ jobs:
           cd repo
           git checkout -B fix/kepco-login-response-compat-20260904
           python /tmp/apply-kepco-login-fix.py
+          python - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              "tests/test_api.py": {
+                  "HomeAssistant-KEPCO-ON/0.3.1": "HomeAssistant-KEPCO-ON/0.3.3",
+              },
+              "tests/test_diagnostics.py": {
+                  '"version": "0.3.1"': '"version": "0.3.3"',
+              },
+              "tests/test_scaffold.py": {
+                  '"version": "0.3.2"': '"version": "0.3.3"',
+                  'const.VERSION == "0.3.1"': 'const.VERSION == "0.3.3"',
+              },
+          }
+          for filename, mapping in replacements.items():
+              path = Path(filename)
+              text = path.read_text(encoding="utf-8")
+              for old, new in mapping.items():
+                  if old not in text:
+                      raise SystemExit(f"expected version assertion missing: {filename}: {old}")
+                  text = text.replace(old, new)
+              path.write_text(text, encoding="utf-8")
+          PY
           sed -i '/^최소 Home Assistant 버전/i\- 기존 `v0.3.2`의 주택용 직접계약 호환성 개선은 그대로 유지됩니다.' RELEASE_NOTES.md
           sed -i '/^최소 Home Assistant 버전/i\- 기존 `v0.3.2`의 주택용 파서 안정성 보강도 그대로 유지됩니다.' RELEASE_NOTES.md
           git diff --check
@@ -114,8 +138,11 @@ jobs:
             custom_components/kepco_on/translations/en.json \
             custom_components/kepco_on/translations/ko.json \
             pyproject.toml \
+            tests/test_api.py \
             tests/test_auth.py \
             tests/test_config_flow.py \
+            tests/test_diagnostics.py \
+            tests/test_scaffold.py \
             tests/test_version_metadata.py
           expected_files="$(printf '%s\n' \
             README.md \
@@ -128,8 +155,11 @@ jobs:
             custom_components/kepco_on/translations/en.json \
             custom_components/kepco_on/translations/ko.json \
             pyproject.toml \
+            tests/test_api.py \
             tests/test_auth.py \
             tests/test_config_flow.py \
+            tests/test_diagnostics.py \
+            tests/test_scaffold.py \
             tests/test_version_metadata.py | sort)"
           actual_files="$(git diff --cached --name-only | sort)"
           test "$actual_files" = "$expected_files"
