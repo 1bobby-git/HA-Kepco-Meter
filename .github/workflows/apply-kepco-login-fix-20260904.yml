@@ -40,6 +40,7 @@ jobs:
           cd repo
           git checkout -B fix/kepco-login-response-compat-20260904
           python /tmp/apply-kepco-login-fix.py
+          sed -i '/^최소 Home Assistant 버전/i\- 기존 `v0.3.2`의 주택용 직접계약 호환성 개선은 그대로 유지됩니다.\' RELEASE_NOTES.md
           git diff --check
           git diff --stat
 
