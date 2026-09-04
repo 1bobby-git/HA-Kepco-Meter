@@ -599,7 +599,7 @@ async def test_user_step_errors_close_session_and_retry_can_succeed(
         (KepcoOnUnsupportedAccount("corp"), "unsupported_account"),
         (KepcoOnNoCustomersError("none"), "no_customers"),
         (KepcoOnMfaRequired("mfa"), "mfa_required"),
-        (KepcoOnProtocolError("shape"), "protocol_changed"),
+        (KepcoOnProtocolError("shape"), "protocol_changed_login"),
     ],
 )
 async def test_user_step_maps_validation_errors(
@@ -625,6 +625,20 @@ async def test_user_step_maps_validation_errors(
 
 
 @pytest.mark.asyncio
+async def test_user_step_account_type_protocol_error_is_distinguished(
+    patched_flow_dependencies: list[FakeSession],
+) -> None:
+    FakeClient.account_results = [KepcoOnProtocolError("account type shape changed")]
+    flow = make_flow()
+
+    result = await submit_user(flow)
+
+    assert result["type"] == "form"
+    assert result["errors"] == {"base": "protocol_changed_account_type"}
+    assert patched_flow_dependencies[0].closed is True
+
+
+@pytest.mark.asyncio
 async def test_user_step_protocol_log_contains_only_safe_stage_and_field(
     patched_flow_dependencies: list[FakeSession],
     caplog: pytest.LogCaptureFixture,
@@ -644,7 +658,7 @@ async def test_user_step_protocol_log_contains_only_safe_stage_and_field(
             },
         )
 
-    assert result["errors"] == {"base": "protocol_changed"}
+    assert result["errors"] == {"base": "protocol_changed_customers"}
     assert patched_flow_dependencies[0].closed is True
     assert "during customers" in caplog.text
     assert "KepcoOnProtocolError" in caplog.text
@@ -1138,7 +1152,7 @@ async def test_reconfigure_loaded_entry_uses_live_customers_and_persists_selecte
     ("raised", "error"),
     [
         (KepcoOnConnectionError(PASSWORD_SECRET), "cannot_connect"),
-        (KepcoOnProtocolError(PASSWORD_SECRET), "protocol_changed"),
+        (KepcoOnProtocolError(PASSWORD_SECRET), "protocol_changed_customers"),
     ],
 )
 async def test_reconfigure_live_refresh_error_allows_retry_with_safe_form_error(
@@ -1379,6 +1393,9 @@ def test_translation_files_have_required_key_parity() -> None:
         "no_customers",
         "mfa_required",
         "protocol_changed",
+        "protocol_changed_login",
+        "protocol_changed_account_type",
+        "protocol_changed_customers",
         "invalid_selection",
         "invalid_co2_factor",
         "invalid_history_months",

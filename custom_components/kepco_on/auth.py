@@ -280,7 +280,7 @@ class KepcoOnAuth:
         try:
             session = KepcoAccountSession(
                 refresh_token=_require_str(payload, "refreshToken"),
-                token=_require_str(payload, "token"),
+                token=self._optional_str(payload, "token"),
                 user_id=_require_str(payload, "userId"),
                 member_name=_require_str(payload, "mbrsNm"),
                 user_mng_seqno=self._optional_str(payload, "userMngSeqno"),
@@ -308,7 +308,7 @@ class KepcoOnAuth:
     ) -> KepcoAccountSession:
         return KepcoAccountSession(
             refresh_token=_require_str(payload, "refreshToken"),
-            token=_require_str(payload, "token"),
+            token=self._optional_str(payload, "token") or previous.token,
             user_id=_require_str(payload, "userId"),
             member_name=_require_str(payload, "mbrsNm"),
             user_mng_seqno=self._optional_str(payload, "userMngSeqno") or previous.user_mng_seqno,

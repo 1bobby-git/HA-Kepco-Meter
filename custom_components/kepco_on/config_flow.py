@@ -155,7 +155,14 @@ def _base_user_schema() -> vol.Schema:
     )
 
 
-def _map_error(err: Exception) -> str:
+PROTOCOL_STAGE_ERRORS = {
+    "login": "protocol_changed_login",
+    "account_type": "protocol_changed_account_type",
+    "customers": "protocol_changed_customers",
+}
+
+
+def _map_error(err: Exception, *, stage: str | None = None) -> str:
     if isinstance(err, KepcoOnMfaRequired):
         return "mfa_required"
     if isinstance(err, KepcoOnAuthError):
@@ -169,7 +176,9 @@ def _map_error(err: Exception) -> str:
     if isinstance(err, KepcoOnNoCustomersError):
         return "no_customers"
     if isinstance(err, KepcoOnProtocolError):
-        return "protocol_changed"
+        if stage is None:
+            return "protocol_changed"
+        return PROTOCOL_STAGE_ERRORS.get(stage, "protocol_changed")
     return "unknown"
 
 
@@ -275,7 +284,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 type(err).__name__,
                 err,
             )
-            form_error = _map_error(err)
+            form_error = _map_error(err, stage=validation_stage)
         finally:
             if not login_succeeded:
                 await _close_session(client_session)
@@ -372,6 +381,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
         form_error: str | None = None
         login_succeeded = False
+        validation_stage = "login"
         try:
             store = FlowSessionStore()
             username = str(entry.data[CONF_USERNAME])
@@ -388,13 +398,15 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if account_uid_hash != expected_account_uid_hash:
                 raise KepcoOnAuthError("Authenticated KEPCO ON account does not match entry")
             client = KepcoOnClient(auth)
+            validation_stage = "account_type"
             await client.async_get_account_type()
+            validation_stage = "customers"
             customers = await client.async_get_customers()
             if not customers:
                 raise KepcoOnNoCustomersError("No KEPCO ON apartment customers found")
             login_succeeded = True
         except EXPECTED_CONFIG_FLOW_ERRORS as err:
-            form_error = _map_error(err)
+            form_error = _map_error(err, stage=validation_stage)
         finally:
             if not login_succeeded:
                 await _close_session(client_session)
@@ -503,7 +515,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 KepcoOnRateLimitError,
                 KepcoOnUnsupportedAccount,
             ) as err:
-                return None, _map_error(err)
+                return None, _map_error(err, stage="customers")
             if not live_customers:
                 return None, "no_customers"
             self._reconfigure_customers = live_customers
