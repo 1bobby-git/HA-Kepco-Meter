@@ -40,8 +40,8 @@ jobs:
           cd repo
           git checkout -B fix/kepco-login-response-compat-20260904
           python /tmp/apply-kepco-login-fix.py
-          sed -i '/^최소 Home Assistant 버전/i\- 기존 `v0.3.2`의 주택용 직접계약 호환성 개선은 그대로 유지됩니다.\
-- 기존 `v0.3.2`의 주택용 파서 안정성 보강도 그대로 유지됩니다.\' RELEASE_NOTES.md
+          sed -i '/^최소 Home Assistant 버전/i\- 기존 `v0.3.2`의 주택용 직접계약 호환성 개선은 그대로 유지됩니다.' RELEASE_NOTES.md
+          sed -i '/^최소 Home Assistant 버전/i\- 기존 `v0.3.2`의 주택용 파서 안정성 보강도 그대로 유지됩니다.' RELEASE_NOTES.md
           git diff --check
           git diff --stat
 
@@ -75,9 +75,9 @@ jobs:
         working-directory: repo
         run: npm audit --audit-level=moderate
 
-      - name: Format changed Python source
+      - name: Check formatting
         working-directory: repo
-        run: python -m ruff format .
+        run: python -m ruff format --check .
 
       - name: Lint
         working-directory: repo
@@ -140,10 +140,10 @@ jobs:
             --output="../kepco_on-v0.3.3-rc.zip" \
             HEAD:custom_components/kepco_on
           unzip -t ../kepco_on-v0.3.3-rc.zip
-          git push --force origin HEAD:refs/heads/fix/kepco-login-response-compat-20260904
+          git push origin HEAD:refs/heads/fix/kepco-login-response-compat-20260904
 
       - name: Upload tested Home Assistant package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # source: actions/upload-artifact@v4
         with:
           name: kepco_on-v0.3.3-rc
           path: kepco_on-v0.3.3-rc.zip
