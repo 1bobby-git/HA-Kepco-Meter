@@ -12,9 +12,6 @@ jobs:
   validate-and-publish:
     runs-on: ubuntu-24.04
     timeout-minutes: 35
-    env:
-      PATCH_SPEC: >-
-        {"repository":"1bobby-git/HA-Kepco-Meter","branch":"main","base_version":"0.3.3","candidate_version":"0.3.4","summary":["TCP/HTTP 분할 수신을 응답 전체로 오인하는 단일 read(n) 처리 수정","기존 2 MiB 제한·요청 타임아웃·호스트/경로 제한·재시도·인증 실패 구분은 유지","로그인 준비 페이지와 JSON 응답 모두 EOF까지 크기 제한을 지켜 수신","이 패치는 이전 로그인 장애의 모든 원인이 해결됐다는 의미는 아니며 실제 계정 검증이 필요"],"changes":[{"path":"custom_components/kepco_on/api.py","git_blob_sha1":"1173c359980788da6f6e487b9ac4e9175272dc36","old":"def _is_json_content_type(content_type: str) -> bool:\n","new":"async def _read_bounded_body(\n    response: ClientResponse,\n    *,\n    error_reason: str = \"response is too large\",\n) -> bytes:\n    \"\"\"Read through EOF, including split chunks, with the existing byte cap.\"\"\"\n    body = bytearray()\n    while True:\n        # read(n) may return fewer than n bytes before EOF. Reserve one byte\n        # beyond the cap to detect overflow without buffering an unbounded body.\n        chunk = await response.content.read(\n            min(64 * 1024, MAX_RESPONSE_BYTES + 1 - len(body))\n        )\n        if not chunk:\n            return bytes(body)\n        body.extend(chunk)\n        if len(body) > MAX_RESPONSE_BYTES:\n            raise _safe_protocol_error(error_reason)\n\n\ndef _is_json_content_type(content_type: str) -> bool:\n"},{"path":"custom_components/kepco_on/api.py","git_blob_sha1":"1173c359980788da6f6e487b9ac4e9175272dc36","old":"                body = await response.content.read(MAX_RESPONSE_BYTES + 1)\n                if len(body) > MAX_RESPONSE_BYTES:\n                    raise _safe_protocol_error(\"login bootstrap response was too large\")\n","new":"                await _read_bounded_body(\n                    response, error_reason=\"login bootstrap response was too large\"\n                )\n"},{"path":"custom_components/kepco_on/api.py","git_blob_sha1":"1173c359980788da6f6e487b9ac4e9175272dc36","old":"        body = await response.content.read(MAX_RESPONSE_BYTES + 1)\n        if len(body) > MAX_RESPONSE_BYTES:\n            raise _safe_protocol_error(\"response is too large\")\n","new":"        body = await _read_bounded_body(response)\n"},{"path":"custom_components/kepco_on/const.py","git_blob_sha1":"cb820e2ff465e7508e5901953dc6e2058cf8874a","old":"VERSION = \"0.3.3\"\n","new":"VERSION = \"0.3.4\"\n"},{"path":"custom_components/kepco_on/manifest.json","git_blob_sha1":"29ea6a720a16ed331cd748290ae19148acc32bc3","old":"\"version\": \"0.3.3\"","new":"\"version\": \"0.3.4\""}]}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -27,10 +24,23 @@ jobs:
           path: .release-helper
           sparse-checkout: .optimization-release
           persist-credentials: false
-      - name: Keep helper outside release source
+      - name: Load approved patches and correct draft lookup
         run: |
-          cp .release-helper/.optimization-release/deploy.py "$RUNNER_TEMP/optimization-deploy.py"
-          rm -rf .release-helper
+          python - <<'PY'
+          import json, os, re, shutil, subprocess
+          from pathlib import Path
+          original = subprocess.check_output(['git', 'show', '44745c337565d1bb8da8511545df367e0c5f503c:.github/workflows/deploy-optimization-20260906.yml'], text=True)
+          spec = json.loads(re.search(r'PATCH_SPEC: >-\s+(\{[^\n]+\})', original).group(1))
+          with open(os.environ['GITHUB_ENV'], 'a') as output:
+              output.write('PATCH_SPEC=' + json.dumps(spec, ensure_ascii=False) + '\n')
+          source = Path('.release-helper/.optimization-release')
+          text = (source/'deploy.py').read_text()
+          old = '    release = api("releases/tags/" + state["tag"])'
+          assert text.count(old) == 2
+          text = text.replace(old, '    release = next(r for r in api("releases?per_page=100") if r["tag_name"] == state["tag"])', 1)
+          Path(os.environ['RUNNER_TEMP'], 'optimization-deploy.py').write_text(text)
+          shutil.rmtree('.release-helper')
+          PY
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.14.4'
@@ -61,19 +71,34 @@ jobs:
           python -m pytest --cov=custom_components.kepco_on --cov-report=term-missing --cov-fail-under=95 --junitxml="$RUNNER_TEMP/optimization-baseline.xml"
       - name: Apply exact source patches and update documentation
         run: python "$RUNNER_TEMP/optimization-deploy.py" apply
-      - name: Update release notes
+      - name: Align package version, release notes and formatting
         run: |
           python - <<'PY'
-          import json, os
+          import hashlib, json, os, tomllib
           from pathlib import Path
+          p = Path('pyproject.toml')
+          raw = p.read_bytes()
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest() == '310209da103e73e686c148beacad04cade4bc197'
+          text = raw.decode()
+          old = 'version = "0.3.3"'
+          assert text.count(old) == 1
+          text = text.replace(old, 'version = "0.3.4"')
+          assert tomllib.loads(text)['project']['version'] == '0.3.4'
+          p.write_text(text)
+          readme = Path('README.md')
+          text = readme.read_text()
+          old = '- 버전: `v0.3.3`.'
+          assert text.count(old) == 1
+          readme.write_text(text.replace(old, '- 버전: `v0.3.4`.'))
           notes = Path('RELEASE_NOTES.md')
           assert notes.is_file() and not notes.is_symlink()
           notes.write_text(Path('docs/OPTIMIZATION_2026-09-06.md').read_text())
           state_path = Path(os.environ['RUNNER_TEMP']) / 'optimization-state.json'
           state = json.loads(state_path.read_text())
-          state['paths'] = sorted(set(state['paths'] + ['RELEASE_NOTES.md']))
+          state['paths'] = sorted(set(state['paths'] + ['pyproject.toml', 'RELEASE_NOTES.md']))
           state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n')
           PY
+          python -m ruff format custom_components/kepco_on/api.py
       - name: Check and test complete patched integration
         run: |
           python -m ruff format --check .
@@ -93,7 +118,7 @@ jobs:
         run: python "$RUNNER_TEMP/optimization-deploy.py" publish
       - name: Preserve validation evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: optimization-validation
           path: |
