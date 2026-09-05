@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # source: actions/checkout@v7
         with:
           repository: 1bobby-git/HA-iOS-ANCS
-          ref: a3c60fa97084982b453acba282af739a8bbbf3cd
+          ref: 2c406f1bf81628b291c382935854170eb8c023c2
           path: .release-helper
           sparse-checkout: .optimization-release
           persist-credentials: false
@@ -49,7 +49,7 @@ jobs:
       - name: Prepare isolated publisher and exact patch specification
         run: |
           cp .legacy-helper/.optimization-release/deploy.py "$RUNNER_TEMP/optimization-deploy.py"
-          python .release-helper/.optimization-release/repair_helper_v2.py "$RUNNER_TEMP/optimization-deploy.py"
+          python .release-helper/.optimization-release/repair_helper_v3.py "$RUNNER_TEMP/optimization-deploy.py"
           python - <<'PY'
           import json, os, re
           from pathlib import Path
