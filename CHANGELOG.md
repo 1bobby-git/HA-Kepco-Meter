@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 주택용 직접계약의 월별 청구액(`mainChart` `afterMny`)을 `월별 사용량` 센서의 `amount_krw` 속성과 `get_usage_history` 응답의 `amount_krw` 필드로 노출했습니다. 청구액이 없는 월은 기존과 같은 형태를 유지합니다.
+
 ## 0.3.2
 
 - 주택용 직접계약 고객 행에 `CUST_NO`와 `SI_CUST_NO`가 함께 포함되어도 계약 유형(`주택용*`)을 우선해 주택용으로 인식하도록 호환성을 개선했습니다.
