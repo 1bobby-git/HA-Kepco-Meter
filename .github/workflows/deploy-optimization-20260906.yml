@@ -103,9 +103,28 @@ jobs:
           old = '"HomeAssistant-KEPCO-ON/0.3.3"'
           assert text.count(old) == 2
           tests.write_text(text.replace(old, '"HomeAssistant-KEPCO-ON/0.3.4"'))
+          version_fixtures = {
+              'tests/test_auth.py': ('b9867246699a839a022fd0226d63148f783de70d', [
+                  ('assert request.headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.3.3"', 'assert request.headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.3.4"')]),
+              'tests/test_diagnostics.py': ('7dc9a15e8a48892ad431224b30e2344d28e3cca2', [
+                  ('"version": "0.3.3"', '"version": "0.3.4"')]),
+              'tests/test_scaffold.py': ('fa560803708f78a697ffab15ea77be7f220dab7a', [
+                  ('"version": "0.3.3"', '"version": "0.3.4"'),
+                  ('assert const.VERSION == "0.3.3"', 'assert const.VERSION == "0.3.4"')]),
+          }
+          for name, (expected_sha, replacements) in version_fixtures.items():
+              p = Path(name)
+              assert p.is_file() and not p.is_symlink(), name
+              raw = p.read_bytes()
+              assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest() == expected_sha, name
+              text = raw.decode()
+              for old, new in replacements:
+                  assert text.count(old) == 1, (name, old)
+                  text = text.replace(old, new)
+              p.write_text(text)
           state_path = Path(os.environ['RUNNER_TEMP']) / 'optimization-state.json'
           state = json.loads(state_path.read_text())
-          state['paths'] = sorted(set(state['paths'] + ['pyproject.toml', 'RELEASE_NOTES.md', 'tests/test_api.py']))
+          state['paths'] = sorted(set(state['paths'] + ['pyproject.toml', 'RELEASE_NOTES.md', 'tests/test_api.py'] + list(version_fixtures)))
           for name in state['paths']:
               if name.endswith('.md'):
                   p = Path(name)
