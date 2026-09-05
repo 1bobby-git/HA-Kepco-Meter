@@ -85,7 +85,7 @@ jobs:
           python -m pytest --cov=custom_components.kepco_on --cov-report=term-missing --cov-fail-under=95 --junitxml="$RUNNER_TEMP/optimization-baseline.xml"
       - name: Apply exact bounded-read patch and update documentation
         run: python "$RUNNER_TEMP/optimization-deploy.py" apply
-      - name: Synchronize release metadata and preserve documented compatibility
+      - name: Synchronize release metadata and version-specific test expectations
         run: |
           python - <<'PY'
           import json, os, subprocess, tomllib
@@ -93,42 +93,29 @@ jobs:
           state_path = Path(os.environ['RUNNER_TEMP']) / 'optimization-state.json'
           state = json.loads(state_path.read_text())
           updates = [
-              ('pyproject.toml', '310209da103e73e686c148beacad04cade4bc197', 'version = "0.3.3"', 'version = "0.3.4"'),
-              ('README.md', 'b868e5a8fde5c1c128861b3823b071a50607276f', '- 버전: `v0.3.3`.', '- 버전: `v0.3.4`.'),
+              ('pyproject.toml', '310209da103e73e686c148beacad04cade4bc197', 'version = "0.3.3"', 'version = "0.3.4"', 1),
+              ('README.md', 'b868e5a8fde5c1c128861b3823b071a50607276f', '- 버전: `v0.3.3`.', '- 버전: `v0.3.4`.', 1),
+              ('tests/test_api.py', '4c99193c199519ac6d9c89cc5e37370667b9af78', '"HomeAssistant-KEPCO-ON/0.3.3"', '"HomeAssistant-KEPCO-ON/0.3.4"', 2),
+              ('tests/test_auth.py', 'b9867246699a839a022fd0226d63148f783de70d', '"HomeAssistant-KEPCO-ON/0.3.3"', '"HomeAssistant-KEPCO-ON/0.3.4"', 1),
+              ('tests/test_diagnostics.py', '7dc9a15e8a48892ad431224b30e2344d28e3cca2', '"version": "0.3.3"', '"version": "0.3.4"', 1),
+              ('tests/test_scaffold.py', 'fa560803708f78a697ffab15ea77be7f220dab7a', '"0.3.3"', '"0.3.4"', 2),
           ]
-          for name, expected, old, new in updates:
+          for name, expected, old, new, count in updates:
               assert subprocess.check_output(['git', 'rev-parse', 'HEAD:' + name], text=True).strip() == expected, name
               p = Path(name)
               text = p.read_text()
-              assert text.count(old) == 1, name
+              assert text.count(old) == count, name
               p.write_text(text.replace(old, new))
               state['paths'].append(name)
           assert tomllib.loads(Path('pyproject.toml').read_text())['project']['version'] == '0.3.4'
           assert subprocess.check_output(['git', 'rev-parse', 'HEAD:RELEASE_NOTES.md'], text=True).strip() == 'da3b0bf9f4f3b49881877a98c339bbea3913c7c5'
-          notes = '''## 한전ON v0.3.4
-
-          ### HTTP 응답 처리 안정성 개선
-
-          - 나뉘어 수신되는 로그인 준비 페이지와 JSON 본문을 EOF까지 읽어 일부 응답을 전체 응답으로 오인하지 않도록 수정했습니다.
-          - 기존 응답 크기 제한 2 MiB, 호스트·경로 허용 목록, 인증·재시도 정책을 유지합니다.
-          - manifest, 런타임 상수, pyproject와 README의 버전을 0.3.4로 동기화했습니다.
-
-          ### 기존 호환성 유지
-
-          - 기존 주택용 직접계약 호환성 개선을 유지합니다.
-          - 기존 주택용 파서 안정성 보강을 유지합니다.
-          - 로그인 응답의 선택 token 필드 처리, 필수 필드 검증과 오류 진단을 유지합니다.
-          - 최소 Home Assistant 버전은 2026.8.3입니다.
-
-          ### 검증과 업데이트
-
-          변경 전후 전체 저장소 테스트, Ruff·mypy·CI 메타데이터, 95% 커버리지 기준, 로그인 스키마 테스트 및 HACS·Hassfest를 확인합니다.
-          분할 응답·빈 응답·제한 경계·초과·타임아웃·취소의 회귀 테스트를 추가했습니다.
-          실제 계정 로그인과 운영 HA 설치는 이 배포에서 수행하지 않았습니다.
-          변경·검증 범위와 롤백: [최적화 문서](docs/OPTIMIZATION_2026-09-06.md).
-          '''
-          import textwrap
-          Path('RELEASE_NOTES.md').write_text(textwrap.dedent(notes).replace('\n          ', '\n').rstrip() + '\n')
+          previous = Path('RELEASE_NOTES.md').read_text()
+          assert previous.startswith('## 한전ON v0.3.3\n')
+          doc = Path('docs/OPTIMIZATION_2026-09-06.md').read_text()
+          notes = '## 한전ON v0.3.4\n' + doc.split('\n', 1)[1].rstrip()
+          notes += '\n\n분할 응답·빈 응답·크기 제한 경계·초과·타임아웃·취소의 회귀 테스트를 추가했습니다.\n'
+          notes += '\n## 이전 릴리스 참고 (v0.3.3)\n\n' + previous.rstrip() + '\n'
+          Path('RELEASE_NOTES.md').write_text(notes)
           state['paths'].append('RELEASE_NOTES.md')
           state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n')
           PY
@@ -148,6 +135,8 @@ jobs:
 
           from custom_components.kepco_on import api
           from custom_components.kepco_on.exceptions import KepcoOnProtocolError
+
+          pytestmark = pytest.mark.asyncio
 
 
           @pytest.mark.parametrize(
