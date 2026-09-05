@@ -118,6 +118,14 @@ def _history_usage(month_offset: int) -> KepcoValueFunction:
     return value
 
 
+def _history_amount(bill: KepcoBill, month: str) -> int | None:
+    """Return the billed amount recorded for a history month when the response carried one."""
+    for point in bill.history:
+        if point.month == month:
+            return point.amount_krw
+    return None
+
+
 def _household_usage(bill: KepcoBill, options: dict[str, Any]) -> int | None:
     """Return household usage, deriving it only when the response omits one side."""
     del options
@@ -588,6 +596,10 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
                 attributes["usage_period_start"] = bill.period_start
             if bill.period_end is not None:
                 attributes["usage_period_end"] = bill.period_end
+        else:
+            amount = _history_amount(bill, billing_month)
+            if amount is not None:
+                attributes["amount_krw"] = amount
         return attributes
 
 

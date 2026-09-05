@@ -157,7 +157,7 @@ data:
 response_variable: kepco_bill
 ```
 
-`kepco_on.get_usage_history`는 선택 고객의 월별 사용량 이력을 반환합니다. `month`를 비우면 현재 코디네이터가 가진 최신 청구 데이터를 우선 사용합니다.
+`kepco_on.get_usage_history`는 선택 고객의 월별 사용량 이력을 반환합니다. `month`를 비우면 현재 코디네이터가 가진 최신 청구 데이터를 우선 사용합니다. 각 이력 항목은 `month`·`usage_kwh`를 포함하고, 한전ON 응답에 해당 월 청구액이 있으면(주택용 직접계약 `mainChart`) `amount_krw`도 함께 반환합니다. 같은 값은 `월별 사용량` 센서의 `amount_krw` 속성으로도 노출됩니다.
 
 ```yaml
 action: kepco_on.get_usage_history
