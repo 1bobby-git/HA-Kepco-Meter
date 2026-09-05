@@ -1,0 +1,103 @@
+name: Deploy optimization 20260906
+on:
+  push:
+    branches: [release/optimization-20260906]
+    paths: [.github/workflows/deploy-optimization-20260906.yml]
+permissions:
+  contents: write
+concurrency:
+  group: deploy-optimization-20260906
+  cancel-in-progress: false
+jobs:
+  validate-and-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PATCH_SPEC: >-
+        {"repository":"1bobby-git/HA-Kepco-Meter","branch":"main","base_version":"0.3.3","candidate_version":"0.3.4","summary":["TCP/HTTP 분할 수신을 응답 전체로 오인하는 단일 read(n) 처리 수정","기존 2 MiB 제한·요청 타임아웃·호스트/경로 제한·재시도·인증 실패 구분은 유지","로그인 준비 페이지와 JSON 응답 모두 EOF까지 크기 제한을 지켜 수신","이 패치는 이전 로그인 장애의 모든 원인이 해결됐다는 의미는 아니며 실제 계정 검증이 필요"],"changes":[{"path":"custom_components/kepco_on/api.py","git_blob_sha1":"1173c359980788da6f6e487b9ac4e9175272dc36","old":"def _is_json_content_type(content_type: str) -> bool:\n","new":"async def _read_bounded_body(\n    response: ClientResponse,\n    *,\n    error_reason: str = \"response is too large\",\n) -> bytes:\n    \"\"\"Read through EOF, including split chunks, with the existing byte cap.\"\"\"\n    body = bytearray()\n    while True:\n        # read(n) may return fewer than n bytes before EOF. Reserve one byte\n        # beyond the cap to detect overflow without buffering an unbounded body.\n        chunk = await response.content.read(\n            min(64 * 1024, MAX_RESPONSE_BYTES + 1 - len(body))\n        )\n        if not chunk:\n            return bytes(body)\n        body.extend(chunk)\n        if len(body) > MAX_RESPONSE_BYTES:\n            raise _safe_protocol_error(error_reason)\n\n\ndef _is_json_content_type(content_type: str) -> bool:\n"},{"path":"custom_components/kepco_on/api.py","git_blob_sha1":"1173c359980788da6f6e487b9ac4e9175272dc36","old":"                body = await response.content.read(MAX_RESPONSE_BYTES + 1)\n                if len(body) > MAX_RESPONSE_BYTES:\n                    raise _safe_protocol_error(\"login bootstrap response was too large\")\n","new":"                await _read_bounded_body(\n                    response, error_reason=\"login bootstrap response was too large\"\n                )\n"},{"path":"custom_components/kepco_on/api.py","git_blob_sha1":"1173c359980788da6f6e487b9ac4e9175272dc36","old":"        body = await response.content.read(MAX_RESPONSE_BYTES + 1)\n        if len(body) > MAX_RESPONSE_BYTES:\n            raise _safe_protocol_error(\"response is too large\")\n","new":"        body = await _read_bounded_body(response)\n"},{"path":"custom_components/kepco_on/const.py","git_blob_sha1":"cb820e2ff465e7508e5901953dc6e2058cf8874a","old":"VERSION = \"0.3.3\"\n","new":"VERSION = \"0.3.4\"\n"},{"path":"custom_components/kepco_on/manifest.json","git_blob_sha1":"29ea6a720a16ed331cd748290ae19148acc32bc3","old":"\"version\": \"0.3.3\"","new":"\"version\": \"0.3.4\""}]}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          repository: 1bobby-git/HA-iOS-ANCS
+          ref: d5c58703029ea8cfbff4cfd335c59fc49d3fbe98
+          path: .release-helper
+          sparse-checkout: .optimization-release
+          persist-credentials: false
+      - name: Keep helper outside release source
+        run: |
+          cp .release-helper/.optimization-release/deploy.py "$RUNNER_TEMP/optimization-deploy.py"
+          rm -rf .release-helper
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.14.4'
+          cache: pip
+          cache-dependency-path: requirements_test.txt
+      - name: Check source hashes, version and branch protections
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python "$RUNNER_TEMP/optimization-deploy.py" check
+      - name: Install Python test requirements
+        run: python -m pip install -r requirements_test.txt
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.20.0'
+          cache: npm
+      - name: Install Node dependencies
+        run: npm ci
+      - name: Run native Node tests and dependency audit
+        run: |
+          npm run test:login-schema
+          npm audit --audit-level=moderate
+      - name: Check and test unchanged baseline
+        run: |
+          python -m ruff format --check .
+          python -m ruff check .
+          python -m mypy
+          python -m pytest tests/test_ci_metadata.py
+          python -m pytest --cov=custom_components.kepco_on --cov-report=term-missing --cov-fail-under=95 --junitxml="$RUNNER_TEMP/optimization-baseline.xml"
+      - name: Apply exact source patches and update documentation
+        run: python "$RUNNER_TEMP/optimization-deploy.py" apply
+      - name: Update release notes
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          notes = Path('RELEASE_NOTES.md')
+          assert notes.is_file() and not notes.is_symlink()
+          notes.write_text(Path('docs/OPTIMIZATION_2026-09-06.md').read_text())
+          state_path = Path(os.environ['RUNNER_TEMP']) / 'optimization-state.json'
+          state = json.loads(state_path.read_text())
+          state['paths'] = sorted(set(state['paths'] + ['RELEASE_NOTES.md']))
+          state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n')
+          PY
+      - name: Check and test complete patched integration
+        run: |
+          python -m ruff format --check .
+          python -m ruff check .
+          python -m mypy
+          python -m pytest tests/test_ci_metadata.py
+          python -m pytest --cov=custom_components.kepco_on --cov-report=term-missing --cov-fail-under=95 --junitxml="$RUNNER_TEMP/optimization-patched.xml"
+      - name: HACS validation
+        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa
+        with:
+          category: integration
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@a7c616ce81ccda50150bf1595786c71b1883fabb
+      - name: Publish verified commit, tag and release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python "$RUNNER_TEMP/optimization-deploy.py" publish
+      - name: Preserve validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimization-validation
+          path: |
+            ${{ runner.temp }}/optimization-baseline.xml
+            ${{ runner.temp }}/optimization-patched.xml
+            ${{ runner.temp }}/optimization-result.json
+          if-no-files-found: ignore
