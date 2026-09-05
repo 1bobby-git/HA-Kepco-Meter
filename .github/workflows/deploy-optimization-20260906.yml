@@ -96,9 +96,16 @@ jobs:
           assert previous_notes.startswith('## 한전ON v0.3.3\n')
           document = Path('docs/OPTIMIZATION_2026-09-06.md').read_text()
           notes.write_text('## 한전ON v0.3.4\n' + document.split('\n', 1)[1].rstrip() + '\n\n## 이전 릴리스 참고 (v0.3.3)\n\n' + previous_notes.rstrip() + '\n')
+          tests = Path('tests/test_api.py')
+          raw = tests.read_bytes()
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest() == '4c99193c199519ac6d9c89cc5e37370667b9af78'
+          text = raw.decode()
+          old = '"HomeAssistant-KEPCO-ON/0.3.3"'
+          assert text.count(old) == 2
+          tests.write_text(text.replace(old, '"HomeAssistant-KEPCO-ON/0.3.4"'))
           state_path = Path(os.environ['RUNNER_TEMP']) / 'optimization-state.json'
           state = json.loads(state_path.read_text())
-          state['paths'] = sorted(set(state['paths'] + ['pyproject.toml', 'RELEASE_NOTES.md']))
+          state['paths'] = sorted(set(state['paths'] + ['pyproject.toml', 'RELEASE_NOTES.md', 'tests/test_api.py']))
           for name in state['paths']:
               if name.endswith('.md'):
                   p = Path(name)
