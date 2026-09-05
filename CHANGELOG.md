@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 주택용 직접계약의 월별 청구액(`mainChart` `afterMny`)을 `월별 사용량` 센서의 `amount_krw` 속성과 `get_usage_history` 응답의 `amount_krw` 필드로 노출했습니다. 청구액이 없는 월은 기존과 같은 형태를 유지합니다.
+
 ## 0.3.4 — 2026-09-06
 
 - TCP/HTTP 분할 수신을 응답 전체로 오인하는 단일 read(n) 처리 수정

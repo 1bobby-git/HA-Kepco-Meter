@@ -14,7 +14,13 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN, OPT_HISTORY_MONTHS
 from .exceptions import KepcoOnError
-from .models import KepcoBill, KepcoChargeBreakdown, KepcoCoordinatorData, KepcoCustomer
+from .models import (
+    KepcoBill,
+    KepcoChargeBreakdown,
+    KepcoCoordinatorData,
+    KepcoCustomer,
+    KepcoUsageHistoryPoint,
+)
 
 SERVICE_GET_MONTHLY_BILL = "get_monthly_bill"
 SERVICE_GET_USAGE_HISTORY = "get_usage_history"
@@ -139,14 +145,18 @@ def _serialize_charge(charge: KepcoChargeBreakdown) -> dict[str, int]:
     }
 
 
+def _serialize_history_point(point: KepcoUsageHistoryPoint) -> dict[str, Any]:
+    """Serialize one history point; the billed amount is included only when known."""
+    serialized: dict[str, Any] = {"month": point.month, "usage_kwh": point.usage_kwh}
+    if point.amount_krw is not None:
+        serialized["amount_krw"] = point.amount_krw
+    return serialized
+
+
 def _serialize_history(bill: KepcoBill, limit: int) -> dict[str, Any]:
     """Serialize bill history in ascending month order and selected length."""
     points = sorted(bill.history, key=lambda point: point.month)
-    return {
-        "history": [
-            {"month": point.month, "usage_kwh": point.usage_kwh} for point in points[-limit:]
-        ]
-    }
+    return {"history": [_serialize_history_point(point) for point in points[-limit:]]}
 
 
 def _base_schema(*, month_required: bool) -> vol.Schema:

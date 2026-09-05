@@ -723,3 +723,36 @@ def test_services_yaml_and_translations_have_action_metadata_parity() -> None:
     assert services["get_monthly_bill"]["fields"]["config_entry_id"]["selector"] == {
         "config_entry": {"integration": DOMAIN}
     }
+
+
+@pytest.mark.asyncio
+async def test_get_usage_history_includes_billed_amount_only_when_known() -> None:
+    selected = customer("selected-key")
+    latest = bill(
+        "202608",
+        history=(
+            KepcoUsageHistoryPoint("202606", 417, 88450),
+            KepcoUsageHistoryPoint("202607", 457, 101230),
+            KepcoUsageHistoryPoint("202608", 603),
+        ),
+    )
+    entry = FakeConfigEntry(
+        runtime_data=runtime((selected,), FakeClient([]), latest_bill=latest),
+    )
+    hass = FakeHass({entry.entry_id: entry})
+    await setup_services(hass)
+
+    response = await call_action(
+        hass.services.registered[(DOMAIN, "get_usage_history")],
+        hass,
+        "get_usage_history",
+        {"config_entry_id": entry.entry_id, "customer_id": selected.stable_key},
+    )
+
+    assert response == {
+        "history": [
+            {"month": "202606", "usage_kwh": 417, "amount_krw": 88450},
+            {"month": "202607", "usage_kwh": 457, "amount_krw": 101230},
+            {"month": "202608", "usage_kwh": 603},
+        ]
+    }
