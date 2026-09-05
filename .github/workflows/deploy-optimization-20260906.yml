@@ -92,10 +92,17 @@ jobs:
           readme.write_text(text.replace(old, '- 버전: `v0.3.4`.'))
           notes = Path('RELEASE_NOTES.md')
           assert notes.is_file() and not notes.is_symlink()
-          notes.write_text(Path('docs/OPTIMIZATION_2026-09-06.md').read_text())
+          previous_notes = notes.read_text()
+          assert previous_notes.startswith('## 한전ON v0.3.3\n')
+          document = Path('docs/OPTIMIZATION_2026-09-06.md').read_text()
+          notes.write_text('## 한전ON v0.3.4\n' + document.split('\n', 1)[1].rstrip() + '\n\n## 이전 릴리스 참고 (v0.3.3)\n\n' + previous_notes.rstrip() + '\n')
           state_path = Path(os.environ['RUNNER_TEMP']) / 'optimization-state.json'
           state = json.loads(state_path.read_text())
           state['paths'] = sorted(set(state['paths'] + ['pyproject.toml', 'RELEASE_NOTES.md']))
+          for name in state['paths']:
+              if name.endswith('.md'):
+                  p = Path(name)
+                  p.write_text(p.read_text().rstrip() + '\n')
           state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2) + '\n')
           PY
           python -m ruff format custom_components/kepco_on/api.py
