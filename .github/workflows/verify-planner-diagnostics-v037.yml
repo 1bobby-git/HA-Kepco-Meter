@@ -33,6 +33,20 @@ jobs:
           python ../patch-source/.maintenance/prepare_v037.py
           cp ../patch-source/.maintenance/test_planner_state_publication.py tests/
           cp ../patch-source/.maintenance/POWER_PLANNER_DIAGNOSTICS.md docs/
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('tests/test_sensor.py')
+          text = p.read_text(encoding='utf-8')
+          old = '    for entity in successful:\n        is_planner = entity.entity_description.key in {\n            "current_period_usage",\n            "predicted_period_usage",\n        }\n        assert entity.available is not is_planner\n'
+          assert text.count(old) == 1
+          p.write_text(text.replace(old, '    assert {entity.available for entity in successful} == {True}\n'), encoding='utf-8')
+          p = Path('tests/test_planner_state_publication.py')
+          text = p.read_text(encoding='utf-8')
+          old = '    coordinator.data.bills_by_customer_key[item.stable_key] = replace(\n        initial, current_period_usage_kwh=None, power_planner_status="no_data",\n        power_planner_return_code="90",\n    )'
+          new = '    coordinator.data = replace(\n        coordinator.data,\n        bills_by_customer_key={item.stable_key: replace(\n            initial, current_period_usage_kwh=None, power_planner_status="no_data",\n            power_planner_return_code="90",\n        )},\n    )'
+          assert text.count(old) == 1
+          p.write_text(text.replace(old, new), encoding='utf-8')
+          PY
           git diff --check
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
@@ -77,8 +91,8 @@ jobs:
           git diff --check
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add README.md RELEASE_NOTES.md CHANGELOG.md docs/PROTOCOL.md docs/POWER_PLANNER_DIAGNOSTICS.md pyproject.toml custom_components/kepco_on/sensor.py custom_components/kepco_on/const.py custom_components/kepco_on/manifest.json tests/test_api.py tests/test_auth.py tests/test_diagnostics.py tests/test_scaffold.py tests/test_apartment_planner.py tests/test_combined_planner_regression.py tests/test_planner_state_publication.py
-          test "$(git diff --cached --name-only | wc -l)" -eq 16
+          git add README.md RELEASE_NOTES.md CHANGELOG.md docs/PROTOCOL.md docs/POWER_PLANNER_DIAGNOSTICS.md pyproject.toml custom_components/kepco_on/sensor.py custom_components/kepco_on/const.py custom_components/kepco_on/manifest.json tests/test_api.py tests/test_auth.py tests/test_diagnostics.py tests/test_scaffold.py tests/test_apartment_planner.py tests/test_combined_planner_regression.py tests/test_planner_state_publication.py tests/test_sensor.py
+          test "$(git diff --cached --name-only | wc -l)" -eq 17
           git diff --cached > /tmp/kepco-v037.patch
           git commit -m 'fix: retain planner diagnostics for unknown states in v0.3.7'
           git archive --format=zip --output=/tmp/kepco-v037-source.zip HEAD
