@@ -126,3 +126,23 @@ HACS에서 0.3.6으로 업데이트 후 Home Assistant를 재시작합니다. �
 Inspected Core 2026.8.3 `homeassistant/helpers/entity.py`: `Entity.__async_calculate_state` merges `extra_state_attributes` only when available. The integration previously returned unavailable for every absent planner value, so its diagnosis disappeared from `hass.states` even though direct property tests passed. Optional missing fields now remain unknown while the billing snapshot is healthy. Coordinator failure, missing bills, and customer billing errors still make the entities unavailable. Requests, raw-data units, authentication and IDs are unchanged. Real EntityComponent/state-machine/template regression tests cover publication, loss and recovery.
 
 Sources: https://github.com/home-assistant/core/blob/2026.8.3/homeassistant/helpers/entity.py and https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/entity-unavailable/
+
+
+## 한전ON v0.3.8
+
+### 종합계약의 두 파워플래너 센서 복원
+
+- 정확히 아파트(종합계약)에 대해 사용자가 정상 동작을 확인한 요청 조합을 유지합니다: custNo=customer_number, housCntrNo=house_contract_number, chgYmd="".
+- 같은 호환 프로필에서 F_AP_QT와 PREDICT_TOT를 각각 1000으로 나누어 기존 현재/예측 사용량 센서에 전달합니다. 종합계약 예측값을 항상 None으로 버리던 처리를 제거합니다. 추가 옵션이나 템플릿 입력은 필요 없습니다.
+- 변환은 사용자 재현 보고에 기반합니다. PREDICT_TOT의 물리적 의미와 단위가 한전의 모든 계약에서 같다고 확인한 것은 아니며, 공개 화면의 요금 설명과의 차이는 남아 있습니다. conversion_basis 속성에 user_reported_combined_contract를 표시합니다. 숫자가 그럴듯하다는 이유로 단위를 자동 추정하지 않습니다.
+- 두 필드의 파싱과 진단을 분리합니다. 한쪽 null 또는 비정상 숫자는 다른 정상값이나 청구 데이터를 지우지 않습니다. 실제 0은 보존하고 음수, bool, NaN/Infinity는 거부합니다. 서버 실패 코드를 무시하거나 값을 조작하지 않습니다.
+- HA 내부에는 나눗셈 결과 정밀도를 유지하고 표시 권장 소수점만 2자리로 지정합니다. 정상 청구 상태의 누락값은 unknown과 진단 속성을 함께 게시합니다.
+- 단일계약·종합계약/나·주택용의 요청/변환/예측 정책은 유지합니다. 기존 도메인, 설정, 34개 센서 및 unique_id를 유지하고 과거월에는 현재 사용량을 섞지 않습니다. 인증 만료와 취소는 정상 전파됩니다.
+
+### 적용과 검증 범위
+
+HACS에서 0.3.8로 업데이트한 후 Home Assistant 전체 재시작을 수행합니다. 통합 삭제, sed 재수정, 진단값 선제 회신은 필요 없습니다. 현재 값이 없는 경우에만 개별 data_status를 확인합니다.
+
+테스트는 합성 응답을 사용하는 파서·API·실제 HA 상태 머신·Jinja 템플릿 회귀입니다. 운영 HA와 실제 계정에는 접근하지 않았으므로 실계정에서의 완전 동작이나 한전 서버 데이터 제공을 보장하지 않습니다. 사용자 원본 응답/계정 정보/실제 사용량은 커밋하지 않습니다. 기존 기록이나 통계는 변경하지 않습니다.
+
+문제가 생기면 HACS 재다운로드에서 0.3.7을 선택할 수 있습니다. 최소 Home Assistant 버전은 2026.8.3입니다.

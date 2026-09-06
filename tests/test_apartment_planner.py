@@ -153,7 +153,10 @@ async def test_latest_apartment_planner_uses_contract_specific_request(
     ]
     expected_current = 0.12345 if contract == "아파트(종합계약)" else 123.45
     assert result.current_period_usage_kwh == pytest.approx(expected_current)
-    assert result.predicted_period_usage_kwh is None
+    if contract == "아파트(종합계약)":
+        assert result.predicted_period_usage_kwh == pytest.approx(99.999)
+    else:
+        assert result.predicted_period_usage_kwh is None
     assert result.power_planner_status == "ok"
     assert result.power_planner_return_code == "00"
     assert result.usage_kwh == base.usage_kwh
@@ -191,8 +194,10 @@ async def test_missing_current_usage_is_not_fabricated(value: object) -> None:
         {"dma_powerPlanner": {"RETURN_CD": "00", "F_AP_QT": value, "PREDICT_TOT": "99999"}}
     )
     assert result.current_period_usage_kwh is None
-    assert result.predicted_period_usage_kwh is None
-    assert result.power_planner_status == "no_data"
+    assert result.predicted_period_usage_kwh == pytest.approx(99.999)
+    assert result.power_planner_current_status == "no_data"
+    assert result.power_planner_prediction_status == "ok"
+    assert result.power_planner_status == "ok"
     assert result.usage_kwh == synthetic_bill().usage_kwh
 
 
@@ -277,7 +282,7 @@ def test_prediction_unit_is_not_inferred_from_sample_magnitude() -> None:
 
 
 @pytest.mark.asyncio
-async def test_current_sensor_available_and_prediction_explains_unverified_unit() -> None:
+async def test_current_sensor_available_and_missing_prediction_explains_no_data() -> None:
     item = customer()
     current = replace(
         synthetic_bill(),
@@ -307,10 +312,7 @@ async def test_current_sensor_available_and_prediction_explains_unverified_unit(
         assert "TEST_BUILDING" not in encoded
         assert "TEST_HOUSEHOLD" not in encoded
     assert sensors["current_period_usage"].extra_state_attributes["data_status"] == "ok"
-    assert (
-        sensors["predicted_period_usage"].extra_state_attributes["data_status"]
-        == "source_unit_unverified"
-    )
+    assert sensors["predicted_period_usage"].extra_state_attributes["data_status"] == "no_data"
 
 
 @pytest.mark.asyncio

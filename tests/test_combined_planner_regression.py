@@ -60,15 +60,21 @@ async def test_parser_to_sensor_converts_once_and_keeps_diagnostic_aliases(
     predicted = sensors["predicted_period_usage"]
     assert current.native_value == pytest.approx(expected)
     assert current.available is True
-    assert predicted.native_value is None
+    combined = contract == "아파트(종합계약)"
+    if combined:
+        assert predicted.native_value == pytest.approx(987.65)
+    else:
+        assert predicted.native_value is None
     assert predicted.available is True
-    assert predicted.extra_state_attributes["data_status"] == "source_unit_unverified"
+    assert predicted.extra_state_attributes["data_status"] == (
+        "ok" if combined else "source_unit_unverified"
+    )
     assert current.extra_state_attributes["value_divisor"] == divisor
-    assert predicted.extra_state_attributes["value_divisor"] is None
+    assert predicted.extra_state_attributes["value_divisor"] == (1000 if combined else None)
     for sensor in (current, predicted):
         attrs = sensor.extra_state_attributes
         assert attrs["return_code"] == attrs["provider_return_code"] == "00"
-        assert attrs["integration_version"] == VERSION == "0.3.7"
+        assert attrs["integration_version"] == VERSION == "0.3.8"
         assert attrs["request_variant"] == variant
         assert "TEST_BUILDING" not in str(attrs)
         assert "TEST_HOUSEHOLD" not in str(attrs)
@@ -89,6 +95,8 @@ async def test_invalid_energy_preserves_safe_code_and_does_not_mask_failure() ->
     )
     for key in ("current_period_usage", "predicted_period_usage"):
         assert sensors[key].available is True
-        assert sensors[key].extra_state_attributes["data_status"] == "invalid_response"
+        assert sensors[key].extra_state_attributes["data_status"] == (
+            "invalid_response" if key == "current_period_usage" else "no_data"
+        )
         assert sensors[key].extra_state_attributes["provider_return_code"] == "00"
     assert sensors["monthly_usage"].available is True

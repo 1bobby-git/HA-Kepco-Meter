@@ -166,6 +166,8 @@ class KepcoBill:
     predicted_period_usage_kwh: float | None = None
     power_planner_status: str = "not_requested"
     power_planner_return_code: str | None = None
+    power_planner_current_status: str | None = None
+    power_planner_prediction_status: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

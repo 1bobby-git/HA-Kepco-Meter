@@ -70,7 +70,7 @@ async def test_planner_attributes_are_published_to_states_and_template(
         state = hass.states.get(sensors[key].entity_id)
         assert state is not None
         expected = (
-            "source_unit_unverified"
+            "no_data"
             if key == "predicted_period_usage"
             and (status == "ok" or (status == "no_data" and code == "00"))
             else status
@@ -79,7 +79,7 @@ async def test_planner_attributes_are_published_to_states_and_template(
         assert state.attributes["data_status"] == expected
         assert state.attributes["return_code"] == code
         assert state.attributes["provider_return_code"] == code
-        assert state.attributes["integration_version"] == "0.3.7"
+        assert state.attributes["integration_version"] == "0.3.8"
         assert state.attributes["data_status_message"]
         assert state.attributes["unit_of_measurement"] == "kWh"
         assert "TEST_BUILDING" not in str(state.attributes)

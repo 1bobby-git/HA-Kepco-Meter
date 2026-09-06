@@ -4,7 +4,7 @@ from homeassistant.const import CONF_PASSWORD, Platform
 
 DOMAIN = "kepco_on"
 NAME = "KEPCO ON"
-VERSION = "0.3.7"
+VERSION = "0.3.8"
 CONFIG_ENTRY_VERSION = 3
 # Scope the user-reported request and Wh conversion to the exact tested contract.
 COMBINED_APARTMENT_PLANNER_CONTRACT = "아파트(종합계약)"
