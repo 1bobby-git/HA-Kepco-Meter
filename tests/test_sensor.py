@@ -600,12 +600,7 @@ async def test_missing_bill_and_partial_failure_availability_are_isolated() -> N
 
     assert len(successful) == 34
     assert len(failed) == 34
-    for entity in successful:
-        is_planner = entity.entity_description.key in {
-            "current_period_usage",
-            "predicted_period_usage",
-        }
-        assert entity.available is not is_planner
+    assert {entity.available for entity in successful} == {True}
     assert {entity.available for entity in failed} == {False}
     assert {entity.native_value for entity in failed} == {None}
     assert {tuple(entity.extra_state_attributes) for entity in failed} == {()}

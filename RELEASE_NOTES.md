@@ -1,3 +1,23 @@
+## 한전ON v0.3.7
+
+### 파워플래너 진단 속성이 사라지는 문제 수정
+
+- 0.3.5와 0.3.6은 파워플래너 값이 None이면 available=False를 반환했습니다. Home Assistant Core 2026.8.3의 Entity 상태 기록은 unavailable일 때 extra_state_attributes를 생략하므로 source_field, data_status, 반환 코드가 실제 상태/템플릿에서 사라졌습니다.
+- 청구 데이터 조회가 성공한 고객은 부가 파워플래너 값이 없더라도 상태를 unknown으로 유지하여 진단 속성을 함께 표시합니다. 값이나 응답 코드를 만들어 채우지 않습니다. 숫자가 0이면 정상적인 0으로 유지합니다.
+- 코디네이터 전체 조회 실패, 고객별 청구 실패, 청구 스냅샷 없음은 기존처럼 unavailable입니다. 이 경우의 속성 생략은 HA 기본 동작입니다.
+- 0.3.6의 종합계약 요청 매핑과 F_AP_QT /1000 변환은 유지합니다. 주택용/다른 계약, 인증 및 재시도, 엔티티 ID/수/설정은 변경하지 않습니다.
+- PREDICT_TOT를 예측 kWh로 강제 매핑하지 않습니다. 단위 미확인 표시는 유지하며 이번 수정은 예측 사용량 숫자를 확보했다는 뜻이 아닙니다.
+- 직접 Python 속성만 검사하던 기존 테스트에 더해 실제 HA EntityComponent, hass.states, Jinja 템플릿으로 상태/속성 발행과 실패/복구를 검증합니다.
+
+### 적용
+
+HACS에서 0.3.7로 업데이트하고 Home Assistant를 재시작합니다. 통합 삭제나 sed 재수정은 필요 없습니다. 두 파워플래너 센서의 integration_version이 0.3.7인지 확인합니다. source_field가 없을 때도 이름으로 찾을 수 있는 템플릿은 docs/POWER_PLANNER_DIAGNOSTICS.md에 있습니다.
+숫자가 계속 없으면 state, data_status, return_code/provider_return_code, data_status_message를 회신합니다. 비밀번호, 토큰, 쿠키, 고객번호를 공개하지 마세요.
+
+운영 HA와 실제 사용자 계정에는 접속하지 않았으며 실제 서버 응답이나 예측 단위는 이번 변경에서 검증하지 않았습니다. 최소 Home Assistant 버전은 2026.8.3입니다. 문제가 생기면 HACS 재다운로드에서 0.3.6으로 되돌릴 수 있습니다.
+
+### 이전 릴리스 기록
+
 ## 한전ON v0.3.6
 
 - 사용자 성공 재현에 따라 정확히 `아파트(종합계약)`인 고객은 파워플래너에 `custNo=customer_number`, `housCntrNo=house_contract_number`, `chgYmd=""`를 전달합니다. 임의 고객번호나 추가 엔드포인트를 사용하지 않습니다.

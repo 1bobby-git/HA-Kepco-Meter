@@ -61,14 +61,14 @@ async def test_parser_to_sensor_converts_once_and_keeps_diagnostic_aliases(
     assert current.native_value == pytest.approx(expected)
     assert current.available is True
     assert predicted.native_value is None
-    assert predicted.available is False
+    assert predicted.available is True
     assert predicted.extra_state_attributes["data_status"] == "source_unit_unverified"
     assert current.extra_state_attributes["value_divisor"] == divisor
     assert predicted.extra_state_attributes["value_divisor"] is None
     for sensor in (current, predicted):
         attrs = sensor.extra_state_attributes
         assert attrs["return_code"] == attrs["provider_return_code"] == "00"
-        assert attrs["integration_version"] == VERSION == "0.3.6"
+        assert attrs["integration_version"] == VERSION == "0.3.7"
         assert attrs["request_variant"] == variant
         assert "TEST_BUILDING" not in str(attrs)
         assert "TEST_HOUSEHOLD" not in str(attrs)
@@ -88,7 +88,7 @@ async def test_invalid_energy_preserves_safe_code_and_does_not_mask_failure() ->
         await setup_entities(customers=(item,), bills_by_customer_key={item.stable_key: bill})
     )
     for key in ("current_period_usage", "predicted_period_usage"):
-        assert sensors[key].available is False
+        assert sensors[key].available is True
         assert sensors[key].extra_state_attributes["data_status"] == "invalid_response"
         assert sensors[key].extra_state_attributes["provider_return_code"] == "00"
     assert sensors["monthly_usage"].available is True
