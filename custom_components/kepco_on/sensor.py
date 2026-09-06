@@ -326,6 +326,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
     KepcoSensorEntityDescription(
         key="current_period_usage",
         translation_key="current_period_usage",
+        suggested_display_precision=2,
         device_group=KepcoDeviceGroup.METER_USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
@@ -334,6 +335,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
     KepcoSensorEntityDescription(
         key="predicted_period_usage",
         translation_key="predicted_period_usage",
+        suggested_display_precision=2,
         device_group=KepcoDeviceGroup.METER_USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
@@ -604,12 +606,22 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
             return {}
         key = self.entity_description.key
         if key in POWER_PLANNER_FIELDS:
-            status = bill.power_planner_status
-            if key == "predicted_period_usage" and (
-                status == "ok" or (status == "no_data" and bill.power_planner_return_code == "00")
-            ):
-                status = "source_unit_unverified"
             combined = self.customer.contract_method == COMBINED_APARTMENT_PLANNER_CONTRACT
+            field_status = (
+                bill.power_planner_current_status
+                if key == "current_period_usage"
+                else bill.power_planner_prediction_status
+            )
+            status = field_status or bill.power_planner_status
+            if (
+                field_status is None
+                and key == "predicted_period_usage"
+                and (
+                    status == "ok"
+                    or (status == "no_data" and bill.power_planner_return_code == "00")
+                )
+            ):
+                status = "no_data" if combined else "source_unit_unverified"
             # Billing dates describe a past bill, not the current planner period.
             return {
                 "data_source": "kepco_power_planner",
@@ -622,8 +634,11 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
                 "request_variant": (
                     "apartment_customer_and_contract" if combined else "household_and_change_date"
                 ),
-                "value_divisor": (
-                    (1000 if combined else 1) if key == "current_period_usage" else None
+                "value_divisor": 1000
+                if combined
+                else (1 if key == "current_period_usage" else None),
+                "conversion_basis": (
+                    "user_reported_combined_contract" if combined else "legacy_contract_profile"
                 ),
             }
         offset = self.entity_description.history_month_offset

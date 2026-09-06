@@ -1,6 +1,6 @@
 [project]
 name = "ha-kepco-meter"
-version = "0.3.7"
+version = "0.3.8"
 requires-python = ">=3.14"
 
 [tool.pytest.ini_options]

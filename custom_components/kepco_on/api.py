@@ -40,8 +40,8 @@ from .parser import (
     parse_bill,
     parse_customers,
     parse_house_bill,
-    parse_power_planner,
     parse_power_planner_return_code,
+    parse_power_planner_value,
     parse_year_month,
 )
 
@@ -410,7 +410,6 @@ class KepcoOnClient:
                 submission_id="mf_wfm_layout_sbm_powerPlanner",
             )
             code = parse_power_planner_return_code(payload)
-            current, predicted = parse_power_planner(payload, current_unit_wh=combined)
         except KepcoOnRateLimitError:
             return dataclasses.replace(bill, power_planner_status="rate_limited")
         except KepcoOnConnectionError:
@@ -419,13 +418,33 @@ class KepcoOnClient:
             return dataclasses.replace(
                 bill, power_planner_status="invalid_response", power_planner_return_code=code
             )
+        # A malformed optional field must not discard the other valid field.
         # Authentication and cancellation errors deliberately continue to propagate.
+        values: dict[str, float | None] = {}
+        statuses: dict[str, str] = {}
+        fields = ("F_AP_QT", "PREDICT_TOT") if combined else ("F_AP_QT",)
+        for source_field in fields:
+            try:
+                value = parse_power_planner_value(payload, source_field, unit_wh=combined)
+            except KepcoOnProtocolError:
+                values[source_field] = None
+                statuses[source_field] = "invalid_response"
+            else:
+                values[source_field] = value
+                statuses[source_field] = "ok" if value is not None else "no_data"
+        status = "no_data"
+        if "invalid_response" in statuses.values():
+            status = "invalid_response"
+        if any(value is not None for value in values.values()):
+            status = "ok"
         return dataclasses.replace(
             bill,
-            current_period_usage_kwh=current,
-            predicted_period_usage_kwh=predicted,
-            power_planner_status="ok" if current is not None else "no_data",
+            current_period_usage_kwh=values.get("F_AP_QT"),
+            predicted_period_usage_kwh=values.get("PREDICT_TOT"),
+            power_planner_status=status,
             power_planner_return_code=code,
+            power_planner_current_status=statuses.get("F_AP_QT"),
+            power_planner_prediction_status=statuses.get("PREDICT_TOT"),
         )
 
     async def async_get_all_current_bills(

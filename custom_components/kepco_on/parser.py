@@ -207,27 +207,43 @@ def parse_power_planner_return_code(payload: dict[str, object]) -> str | None:
     return code
 
 
-def parse_power_planner(
-    payload: dict[str, object], *, current_unit_wh: bool = False
-) -> tuple[float | None, float | None]:
-    """Parse verified energy data, retaining the legacy two-value interface.
-
-    The public page labels PREDICT_TOT as an expected charge, not a verified
-    energy quantity. Do not publish that ambiguous field as kWh.
-    current_unit_wh is explicitly selected only for the reported combined-contract
-    profile; never infer units from a value's magnitude or integer/float type.
-    """
+def parse_power_planner_value(
+    payload: dict[str, object], source_field: str, *, unit_wh: bool = False
+) -> float | None:
+    """Read one optional quantity without guessing units from numeric magnitude."""
+    field_names = {"F_AP_QT": "current_period_usage", "PREDICT_TOT": "predicted_usage"}
+    if source_field not in field_names:
+        raise ValueError("Unsupported Power Planner field")
+    code = parse_power_planner_return_code(payload)
     result = payload.get("dma_powerPlanner")
-    if not isinstance(result, dict):
-        return (None, None)
-    if parse_power_planner_return_code(payload) not in (None, "00"):
-        return (None, None)
-    current = _parse_float(result.get("F_AP_QT"), "current_period_usage")
-    if current is not None and (not math.isfinite(current) or current < 0):
-        raise KepcoOnProtocolError("current_period_usage must be finite and nonnegative")
-    if current is not None and current_unit_wh:
-        current /= 1000
-    return (current, None)
+    if not isinstance(result, dict) or code not in (None, "00"):
+        return None
+    field_name = field_names[source_field]
+    try:
+        value = _parse_float(result.get(source_field), field_name)
+    except OverflowError as err:
+        raise KepcoOnProtocolError(f"{field_name} is outside the numeric range") from err
+    if value is not None and (not math.isfinite(value) or value < 0):
+        raise KepcoOnProtocolError(f"{field_name} must be finite and nonnegative")
+    return value / 1000 if value is not None and unit_wh else value
+
+
+def parse_power_planner(
+    payload: dict[str, object], *, current_unit_wh: bool = False, predicted_unit_wh: bool = False
+) -> tuple[float | None, float | None]:
+    """Keep legacy defaults; explicitly enable the reported prediction Wh profile.
+
+    The combined-contract compatibility profile follows the user's working
+    request and conversion. It is not proof of a universal KEPCO unit contract.
+    Other profiles continue to leave the ambiguous prediction field unmapped.
+    """
+    current = parse_power_planner_value(payload, "F_AP_QT", unit_wh=current_unit_wh)
+    predicted = (
+        parse_power_planner_value(payload, "PREDICT_TOT", unit_wh=True)
+        if predicted_unit_wh
+        else None
+    )
+    return current, predicted
 
 
 def _parse_float(value: object, field_name: str) -> float | None:
@@ -458,5 +474,6 @@ __all__ = [
     "parse_int",
     "parse_power_planner",
     "parse_power_planner_return_code",
+    "parse_power_planner_value",
     "parse_year_month",
 ]
