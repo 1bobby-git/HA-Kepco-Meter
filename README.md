@@ -22,7 +22,7 @@ Repository: https://github.com/1bobby-git/HA-Kepco-Meter
 - 지원: 한전ON 개인 계정(`INDI`), 아파트/오피스텔 세대 단일계약 및 주택용 직접계약 요금.
 - 미지원: 법인 계정, 전기공사업체 계정, 인증서 로그인, OACX 간편인증 자동화, CAPTCHA/MFA 우회, CO2 실측값. Power Planner 값은 실시간 스마트미터 값이 아닙니다.
 - 통신: `https://online.kepco.co.kr`의 고정된 한전ON 경로만 사용하며 TLS 검증을 끄지 않습니다.
-- 버전: `v0.3.3`. 선택 고객마다 5개 논리 기기와 34개 센서 엔티티를 생성합니다.
+- 버전: `v0.3.4`. 선택 고객마다 5개 논리 기기와 34개 센서 엔티티를 생성합니다.
 
 ## 설치
 
@@ -241,3 +241,12 @@ Home Assistant에서 통합 항목을 삭제하면 이 통합이 소유한 항�
 ## English Summary
 
 This is an unofficial Home Assistant custom integration for KEPCO ON individual apartment billing. It exposes monthly billing sensors and response actions, not real-time meter telemetry. Store credentials only if you accept Home Assistant storage and backup risk.
+
+## 통합 업데이트 0.3.4
+
+- TCP/HTTP 분할 수신을 응답 전체로 오인하는 단일 read(n) 처리 수정
+- 기존 2 MiB 제한·요청 타임아웃·호스트/경로 제한·재시도·인증 실패 구분은 유지
+- 로그인 준비 페이지와 JSON 응답 모두 EOF까지 크기 제한을 지켜 수신
+- 이 패치는 이전 로그인 장애의 모든 원인이 해결됐다는 의미는 아니며 실제 계정 검증이 필요
+
+변경 내용, 검증 범위 및 롤백 방법: [최적화 문서](docs/OPTIMIZATION_2026-09-06.md). 펌웨어·브리지 앱은 변경하지 않으며, 운영 HA 설치·실기기 검증은 별도입니다.

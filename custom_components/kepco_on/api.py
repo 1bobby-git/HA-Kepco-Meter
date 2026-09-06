@@ -100,6 +100,24 @@ def _safe_protocol_error(reason: str) -> KepcoOnProtocolError:
     return KepcoOnProtocolError(f"Unexpected KEPCO ON response: {reason}")
 
 
+async def _read_bounded_body(
+    response: ClientResponse,
+    *,
+    error_reason: str = "response is too large",
+) -> bytes:
+    """Read through EOF, including split chunks, with the existing byte cap."""
+    body = bytearray()
+    while True:
+        # read(n) may return fewer than n bytes before EOF. Reserve one byte
+        # beyond the cap to detect overflow without buffering an unbounded body.
+        chunk = await response.content.read(min(64 * 1024, MAX_RESPONSE_BYTES + 1 - len(body)))
+        if not chunk:
+            return bytes(body)
+        body.extend(chunk)
+        if len(body) > MAX_RESPONSE_BYTES:
+            raise _safe_protocol_error(error_reason)
+
+
 def _is_json_content_type(content_type: str) -> bool:
     lowered = content_type.lower()
     return lowered == "application/json" or lowered.endswith("+json")
@@ -159,9 +177,9 @@ class KepcoOnTransport:
                     raise _safe_protocol_error("login bootstrap host changed")
                 if response.status != 200:
                     raise KepcoOnConnectionError("Could not initialize KEPCO ON login session")
-                body = await response.content.read(MAX_RESPONSE_BYTES + 1)
-                if len(body) > MAX_RESPONSE_BYTES:
-                    raise _safe_protocol_error("login bootstrap response was too large")
+                await _read_bounded_body(
+                    response, error_reason="login bootstrap response was too large"
+                )
         except KepcoOnConnectionError, KepcoOnProtocolError:
             raise
         except (TimeoutError, ClientError) as err:
@@ -242,9 +260,7 @@ class KepcoOnTransport:
         if response.status >= 400:
             raise KepcoOnConnectionError(f"KEPCO ON returned HTTP {response.status}")
 
-        body = await response.content.read(MAX_RESPONSE_BYTES + 1)
-        if len(body) > MAX_RESPONSE_BYTES:
-            raise _safe_protocol_error("response is too large")
+        body = await _read_bounded_body(response)
         if _looks_like_login_markup(body):
             raise KepcoOnSessionExpired("KEPCO ON session expired")
         if not body.strip():
