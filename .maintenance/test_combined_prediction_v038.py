@@ -118,9 +118,15 @@ async def test_real_parsers_publish_both_values_to_ha_and_template(hass: HomeAss
     assert auth.calls[1][2] == "mf_wfm_layout_sbm_powerPlanner"
     assert len(auth.calls) == 2
     monthly = hass.states.get(sensors["monthly_usage"].entity_id)
-    assert monthly is not None and monthly.state == str(bill.usage_kwh)
-    output = Template("{% for s in states.sensor if s.attributes.get('source_field') in ['F_AP_QT','PREDICT_TOT'] %}{{ s.state }};{% endfor %}", hass).async_render(parse_result=False)
-    assert "246.8" in output and "987.654" in output
+    assert monthly is not None
+    assert monthly.state == str(bill.usage_kwh)
+    output = Template(
+        "{% for s in states.sensor if s.attributes.get('source_field') "
+        "in ['F_AP_QT','PREDICT_TOT'] %}{{ s.state }};{% endfor %}",
+        hass,
+    ).async_render(parse_result=False)
+    assert "246.8" in output
+    assert "987.654" in output
     assert "unknown" not in output
 
 
@@ -162,7 +168,8 @@ async def test_zero_missing_then_recovery_uses_latest_snapshot(hass: HomeAssista
     sensors = await publish(hass, entities)
     for key in KEYS:
         state = hass.states.get(sensors[key].entity_id)
-        assert state is not None and float(state.state) == 0
+        assert state is not None
+        assert float(state.state) == 0
     coordinator = sensors[KEYS[0]].coordinator
     scenarios: tuple[tuple[dict[str, object], tuple[float, float] | None], ...] = (
         ({"dma_powerPlanner": {}}, None),
