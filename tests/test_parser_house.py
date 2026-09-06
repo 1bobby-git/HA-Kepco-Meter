@@ -126,7 +126,7 @@ def test_parse_house_bill_missing_chart_raises() -> None:
 def test_parse_power_planner() -> None:
     current, predicted = parse_power_planner(_load("house_power_planner.json"))
     assert current == pytest.approx(509.783)
-    assert predicted == pytest.approx(636.263)
+    assert predicted is None
 
 
 def test_parse_power_planner_absent_returns_none() -> None:

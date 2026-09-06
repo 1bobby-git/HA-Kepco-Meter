@@ -33,6 +33,20 @@ KepcoSensorValue = str | int | float | date | None
 KepcoSensorAttributes = dict[str, str | date | int | None]
 KepcoValueFunction = Callable[[KepcoBill, dict[str, Any]], KepcoSensorValue]
 
+POWER_PLANNER_FIELDS = {
+    "current_period_usage": "F_AP_QT",
+    "predicted_period_usage": "PREDICT_TOT",
+}
+POWER_PLANNER_MESSAGES = {
+    "ok": "한전 파워플래너에서 사용량을 수신했습니다.",
+    "no_data": "한전 파워플래너가 해당 계약의 사용량을 제공하지 않았습니다.",
+    "not_requested": "현재 검침기간 사용량을 아직 조회하지 않았습니다.",
+    "rate_limited": "한전 요청 제한으로 부가 사용량 조회를 완료하지 못했습니다.",
+    "connection_error": "한전 파워플래너 연결에 실패했습니다.",
+    "invalid_response": "한전 파워플래너 응답을 해석하지 못했습니다.",
+    "source_unit_unverified": "예측 필드의 kWh 단위가 확인되지 않아 사용량으로 표시하지 않습니다.",
+}
+
 
 class KepcoDeviceGroup(StrEnum):
     """Logical Home Assistant devices created for one KEPCO customer."""
@@ -558,6 +572,8 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         """Return if the customer bill is available."""
         if not super().available:
             return False
+        if self.entity_description.key in POWER_PLANNER_FIELDS and self.native_value is None:
+            return False
         data = self.coordinator.data
         return (
             self.customer.stable_key in data.bills_by_customer_key
@@ -578,6 +594,21 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         bill = self._bill()
         if bill is None:
             return {}
+        key = self.entity_description.key
+        if key in POWER_PLANNER_FIELDS:
+            status = bill.power_planner_status
+            if key == "predicted_period_usage" and (
+                status == "ok" or bill.power_planner_return_code == "00"
+            ):
+                status = "source_unit_unverified"
+            # Billing dates describe a past bill, not the current planner period.
+            return {
+                "data_source": "kepco_power_planner",
+                "source_field": POWER_PLANNER_FIELDS[key],
+                "data_status": status,
+                "data_status_message": POWER_PLANNER_MESSAGES.get(status, status),
+                "return_code": bill.power_planner_return_code,
+            }
         offset = self.entity_description.history_month_offset
         billing_month = (
             _shift_month(bill.bill_month, offset) if offset is not None else bill.bill_month

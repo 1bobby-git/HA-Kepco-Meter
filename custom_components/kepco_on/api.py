@@ -40,6 +40,7 @@ from .parser import (
     parse_customers,
     parse_house_bill,
     parse_power_planner,
+    parse_power_planner_return_code,
     parse_year_month,
 )
 
@@ -346,7 +347,11 @@ class KepcoOnClient:
             },
             submission_id="mf_wfm_layout_sbm_search",
         )
-        return parse_bill(payload, requested_month)
+        bill = parse_bill(payload, requested_month)
+        # Current-period data must never be attached to an explicit historical bill.
+        if requested_month is not None:
+            return bill
+        return await self._async_with_power_planner(bill, customer)
 
     async def _async_get_house_bill(self, customer: KepcoCustomer) -> KepcoBill:
         """Return 주택용 billing history (mainChart) + 파워플래너 현재/예측."""
@@ -371,22 +376,49 @@ class KepcoOnClient:
             submission_id="mf_wfm_layout_sbm_houseChart",
         )
         bill = parse_house_bill(payload)
-        # 파워플래너는 부가 정보라 실패해도 청구 이력은 유지한다.
+        return await self._async_with_power_planner(bill, customer)
+
+    async def _async_with_power_planner(
+        self, bill: KepcoBill, customer: KepcoCustomer
+    ) -> KepcoBill:
+        """Enrich a current bill without losing billing data on optional failures."""
+        # MYM001D00.xml dataInit executes the planner with SI_CUST_NO before
+        # replacing custNo with the apartment's CUST_NO for billing requests.
+        search: dict[str, object] = {
+            "schYm": "",
+            "custNo": customer.house_contract_number,
+            "gubun": "",
+            "schChart": "12",
+            "CUST_NO": "",
+            "housCntrNo": "",
+            "yyyymm": "",
+            "searchType": "",
+            "dong": "",
+            "ho": "",
+            "months": "",
+            "chgYmd": customer.change_ymd,
+        }
         try:
-            planner_payload = await self._auth.async_protected_request(
+            payload = await self._auth.async_protected_request(
                 ENDPOINT_POWER_PLANNER,
-                {"dma_search": {**search, "months": ""}},
+                {"dma_search": search},
                 submission_id="mf_wfm_layout_sbm_powerPlanner",
             )
-        except KepcoOnConnectionError, KepcoOnProtocolError, KepcoOnRateLimitError:
-            return bill
-        current_usage, predicted_usage = parse_power_planner(planner_payload)
-        if current_usage is None and predicted_usage is None:
-            return bill
+            code = parse_power_planner_return_code(payload)
+            current, predicted = parse_power_planner(payload)
+        except KepcoOnRateLimitError:
+            return dataclasses.replace(bill, power_planner_status="rate_limited")
+        except KepcoOnConnectionError:
+            return dataclasses.replace(bill, power_planner_status="connection_error")
+        except KepcoOnProtocolError, OverflowError:
+            return dataclasses.replace(bill, power_planner_status="invalid_response")
+        # Authentication and cancellation errors deliberately continue to propagate.
         return dataclasses.replace(
             bill,
-            current_period_usage_kwh=current_usage,
-            predicted_period_usage_kwh=predicted_usage,
+            current_period_usage_kwh=current,
+            predicted_period_usage_kwh=predicted,
+            power_planner_status="ok" if current is not None else "no_data",
+            power_planner_return_code=code,
         )
 
     async def async_get_all_current_bills(

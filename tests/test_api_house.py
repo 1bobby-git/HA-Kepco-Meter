@@ -71,7 +71,7 @@ async def test_house_bill_combines_main_chart_and_power_planner() -> None:
     assert bill.usage_kwh == 603
     assert bill.amount_krw == 142870
     assert bill.current_period_usage_kwh == pytest.approx(509.783)
-    assert bill.predicted_period_usage_kwh == pytest.approx(636.263)
+    assert bill.predicted_period_usage_kwh is None
     assert calls == [
         (
             ENDPOINT_MAIN_CHART,
@@ -108,7 +108,7 @@ async def test_house_bill_combines_main_chart_and_power_planner() -> None:
                     "dong": "",
                     "ho": "",
                     "months": "",
-                    "chgYmd": "202604",
+                    "chgYmd": "20260409",
                 }
             },
             "mf_wfm_layout_sbm_powerPlanner",

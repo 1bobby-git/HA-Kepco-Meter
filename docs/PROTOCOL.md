@@ -2,8 +2,8 @@
 
 This document records the protocol evidence used by the integration without committing raw KEPCO ON captures.
 
-Document review date: 2026-09-02
-Integration version: `0.2.1`
+Document review date: 2026-09-06
+Integration version: `0.3.5`
 
 ## Evidence Baseline
 
@@ -76,3 +76,29 @@ No raw response body, request body, header set, cookie value, HAR, trace, or scr
 ## Runtime Limitations
 
 Live HAOS validation on 2026-09-01 remains the proven baseline for `v0.1.1`: login, customer selection, current bill retrieval, response actions, restart recovery, 23 enabled entities, the neighbor comparison sensor, and `kg CO₂` rendering passed. Version `v0.2.0` introduced the five logical devices and 32 entities. Version `v0.2.1` normalizes the config-entry/device names and moves three date/day entities into the diagnostic sensor-information category; a live HAOS/HACS upgrade of these presentation changes is not claimed by this document. The controlled invalid-password branch and long-idle token lifetime also remain untested.
+
+
+## v0.3.5 public Power Planner binding verification (2026-09-06)
+
+Source: https://online.kepco.co.kr/ui/my/indi/MYM001D00.xml
+Read-only, credential-free fetch: https://github.com/1bobby-git/HA-Kepco-Meter/actions/runs/34022622853
+
+The public `dataInit` function reads `sel_custNo` from `SI_CUST_NO`, sets
+`dma_search.custNo` and the complete `DC_USER_CHG_NM_YMD`, then submits
+`/my/memo/powerPlanner`. Only afterwards does the apartment billing branch
+replace `custNo` with `CUST_NO` and set `housCntrNo`. The planner must not be
+queried using an apartment building's billing customer number.
+
+The same page recognizes apartment single, comprehensive, and comprehensive/na
+contracts. Current energy rendering is conditional on `RETURN_CD == "00"` and
+uses `F_AP_QT` with kWh. The XML labels `PREDICT_TOT` as expected electricity
+charges; its sample magnitude is not evidence of an energy unit. Version 0.3.5
+therefore keeps the legacy prediction entity ID but does not map that ambiguous
+field into kWh. No derived prediction or monetary sensor is introduced.
+
+A `90` response with null values was recorded in the earlier capture summary;
+this is not a fresh per-account measurement or proof of a specific AMI limitation.
+No private account was accessed in this change. Two planner sensors expose only
+safe status metadata, not raw responses, identifiers, amounts, or tokens. The
+older evidence-baseline rows above describe historical versions, not current
+support. Current-period data is never attached to an explicit historical bill.
