@@ -1,0 +1,120 @@
+name: Verify apartment planner fix
+on:
+  push:
+    branches: [work/kepco-apartment-planner-20260906]
+    paths:
+      - .github/workflows/verify-apartment-planner.yml
+      - .github/maintenance/apply_planner_fix.py
+      - .github/maintenance/test_apartment_planner.py
+permissions:
+  contents: write
+concurrency:
+  group: verify-apartment-planner
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out staged changes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          path: staging
+          persist-credentials: false
+      - name: Check out exact release baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: efa5d0ba838b61dda43c078dc5533794302e722a
+          fetch-depth: 0
+          path: repo
+      - name: Apply checked changes to clean baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd repo
+          test "$(git rev-parse HEAD)" = efa5d0ba838b61dda43c078dc5533794302e722a
+          python ../staging/.github/maintenance/apply_planner_fix.py
+          cp ../staging/.github/maintenance/test_apartment_planner.py tests/test_apartment_planner.py
+          git add -N tests/test_apartment_planner.py
+          git diff --check
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.14.4'
+          cache: pip
+          cache-dependency-path: repo/requirements_test.txt
+      - name: Install Python test dependencies
+        working-directory: repo
+        run: python -m pip install -r requirements_test.txt
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.20.0'
+          cache: npm
+          cache-dependency-path: repo/package-lock.json
+      - name: Run Node tests and dependency audit
+        working-directory: repo
+        run: |
+          npm ci
+          npm run test:login-schema
+          npm audit --audit-level=moderate
+      - name: Format source and check lint
+        working-directory: repo
+        run: |
+          python -m ruff check --select I --fix .
+          python -m ruff format .
+          python -m ruff format --check .
+          python -m ruff check .
+      - name: Type check
+        working-directory: repo
+        run: python -m mypy
+      - name: Run full regression suite with coverage
+        working-directory: repo
+        run: python -m pytest --cov=custom_components.kepco_on --cov-report=term-missing --cov-report=xml:../planner-coverage.xml --cov-fail-under=95 --junitxml=../planner-junit.xml
+      - name: Record exact test results
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          suites = ET.parse('planner-junit.xml').getroot().findall('testsuite')
+          totals = {key: sum(int(s.get(key, 0)) for s in suites) for key in ('tests', 'failures', 'errors', 'skipped')}
+          coverage = ET.parse('planner-coverage.xml').getroot()
+          summary = f"Regression tests: {totals}\nLine coverage: {coverage.get('line-rate')}\nBranch coverage: {coverage.get('branch-rate')}\nNo live account credentials were used.\n"
+          Path('planner-verification.txt').write_text(summary)
+          print(summary)
+          PY
+      - name: Publish verified clean fix branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd repo
+          git diff --check
+          if git diff --name-only HEAD | grep -q '^.github/'; then
+            echo 'Temporary workflows must not enter the release branch'
+            exit 1
+          fi
+          test "$(git diff --name-only HEAD | wc -l)" = 18
+          git checkout -b fix/kepco-apartment-planner-20260906
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md RELEASE_NOTES.md pyproject.toml docs/PROTOCOL.md custom_components/kepco_on/api.py custom_components/kepco_on/const.py custom_components/kepco_on/manifest.json custom_components/kepco_on/models.py custom_components/kepco_on/parser.py custom_components/kepco_on/sensor.py tests/test_api.py tests/test_api_house.py tests/test_auth.py tests/test_diagnostics.py tests/test_parser_house.py tests/test_scaffold.py tests/test_sensor.py tests/test_apartment_planner.py
+          git diff --cached > ../planner-final.patch
+          git commit -m 'fix: support apartment comprehensive contracts and verified planner usage'
+          git rev-parse HEAD >> ../planner-verification.txt
+          git archive --format=zip --prefix=custom_components/kepco_on/ --output=../kepco_on-v0.3.5.zip HEAD:custom_components/kepco_on
+          unzip -t ../kepco_on-v0.3.5.zip
+          git push origin HEAD:refs/heads/fix/kepco-apartment-planner-20260906
+      - name: Upload verification and package
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: apartment-planner-verification
+          path: |
+            planner-verification.txt
+            planner-junit.xml
+            planner-coverage.xml
+            planner-final.patch
+            kepco_on-v0.3.5.zip
+          retention-days: 3
