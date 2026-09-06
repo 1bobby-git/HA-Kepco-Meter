@@ -1,0 +1,40 @@
+name: Read public planner bindings
+on:
+  push:
+    branches: [work/kepco-apartment-planner-20260906]
+    paths: [.github/workflows/read-public-planner.yml]
+permissions:
+  contents: read
+jobs:
+  read:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Read public page definition without credentials
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          import re
+          url = 'https://online.kepco.co.kr/ui/my/indi/MYM001D00.xml'
+          with urlopen(Request(url, headers={'User-Agent': 'HomeAssistant-KEPCO-ON/0.3.4'}), timeout=30) as response:
+              body = response.read(2097153)
+              if len(body) > 2097152:
+                  raise RuntimeError('Public XML exceeded size bound')
+              print('Public page HTTP status:', response.status)
+          text = body.decode('utf-8-sig')
+          Path('public-MYM001D00.xml').write_text(text, encoding='utf-8')
+          lines = text.splitlines()
+          wanted = set()
+          for index, line in enumerate(lines):
+              if re.search(r'powerPlanner|F_AP_QT|PREDICT_TOT|RETURN_CD|sbm_power', line, re.I):
+                  wanted.update(range(max(0, index-12), min(len(lines), index+24)))
+          for index in sorted(wanted):
+              print(f'{index+1}: {lines[index]}')
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-planner-bindings
+          path: public-MYM001D00.xml
+          retention-days: 1
