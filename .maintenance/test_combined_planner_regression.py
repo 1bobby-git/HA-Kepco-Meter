@@ -16,7 +16,7 @@ from .test_sensor import by_key, setup_entities
 
 @pytest.mark.parametrize("value", [0, "0", 246800, "246800", "246,800", 1250.5, "0.5"])
 def test_wh_conversion_is_explicit_and_does_not_infer_from_magnitude(value: object) -> None:
-    payload = {"dma_powerPlanner": {"RETURN_CD": "00", "F_AP_QT": value, "PREDICT_TOT": "987650"}}
+    payload: dict[str, object] = {"dma_powerPlanner": {"RETURN_CD": "00", "F_AP_QT": value, "PREDICT_TOT": "987650"}}
     raw = float(str(value).replace(",", ""))
     assert parse_power_planner(payload) == (raw, None)
     converted, predicted = parse_power_planner(payload, current_unit_wh=True)
