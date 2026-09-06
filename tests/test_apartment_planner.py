@@ -293,7 +293,7 @@ async def test_current_sensor_available_and_prediction_explains_unverified_unit(
     assert sensors["monthly_usage"].available is True
     assert sensors["current_period_usage"].available is True
     assert sensors["current_period_usage"].native_value == 0.0
-    assert sensors["predicted_period_usage"].available is False
+    assert sensors["predicted_period_usage"].available is True
     assert sensors["predicted_period_usage"].native_value is None
     for key in ("current_period_usage", "predicted_period_usage"):
         attrs = sensors[key].extra_state_attributes
@@ -317,7 +317,7 @@ async def test_current_sensor_available_and_prediction_explains_unverified_unit(
 @pytest.mark.parametrize(
     "status", ["no_data", "not_requested", "connection_error", "rate_limited", "invalid_response"]
 )
-async def test_planner_unavailable_reason_does_not_disable_monthly_sensors(status: str) -> None:
+async def test_missing_planner_reason_does_not_disable_monthly_sensors(status: str) -> None:
     item = customer()
     current = replace(synthetic_bill(), power_planner_status=status)
     entities = await setup_entities(
@@ -326,6 +326,6 @@ async def test_planner_unavailable_reason_does_not_disable_monthly_sensors(statu
     sensors = by_key(entities)
     assert sensors["monthly_usage"].available is True
     for key in ("current_period_usage", "predicted_period_usage"):
-        assert sensors[key].available is False
+        assert sensors[key].available is True
         assert sensors[key].extra_state_attributes["data_status"] == status
         assert sensors[key].extra_state_attributes["data_status_message"]

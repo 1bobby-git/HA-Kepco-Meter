@@ -579,8 +579,9 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         """Return if the customer bill is available."""
         if not super().available:
             return False
-        if self.entity_description.key in POWER_PLANNER_FIELDS and self.native_value is None:
-            return False
+        # A valid bill snapshot can have missing optional planner values.
+        # Keep those states unknown so Home Assistant publishes their diagnostics;
+        # unavailable entities lose extra_state_attributes in Entity state writing.
         data = self.coordinator.data
         return (
             self.customer.stable_key in data.bills_by_customer_key

@@ -119,3 +119,10 @@ HACS에서 0.3.6으로 업데이트 후 Home Assistant를 재시작합니다. �
 
 이번 변경의 근거는 사용자 재현 코드와 계정 동작 보고입니다. 실제 사용자 HA/계정에 직접 접속하거나 예측 단위를 검증하지 않았습니다. 실제 서버 미제공 값을 0이나 과거 청구량으로 대체하지 않습니다.
 최소 Home Assistant 버전은 2026.8.3입니다. 문제가 생기면 HACS 재다운로드에서 0.3.5로 되돌릴 수 있습니다.
+
+
+## v0.3.7: Home Assistant state-attribute publication
+
+Inspected Core 2026.8.3 `homeassistant/helpers/entity.py`: `Entity.__async_calculate_state` merges `extra_state_attributes` only when available. The integration previously returned unavailable for every absent planner value, so its diagnosis disappeared from `hass.states` even though direct property tests passed. Optional missing fields now remain unknown while the billing snapshot is healthy. Coordinator failure, missing bills, and customer billing errors still make the entities unavailable. Requests, raw-data units, authentication and IDs are unchanged. Real EntityComponent/state-machine/template regression tests cover publication, loss and recovery.
+
+Sources: https://github.com/home-assistant/core/blob/2026.8.3/homeassistant/helpers/entity.py and https://developers.home-assistant.io/docs/core/integration-quality-scale/rules/entity-unavailable/
