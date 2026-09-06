@@ -21,6 +21,7 @@ from .const import (
     CONF_SESSION_HANDOFF,
     CONF_USERNAME,
     CONFIG_ENTRY_VERSION,
+    OPT_APARTMENT_POWER_PLANNER_WH,
     OPT_ENABLE_CO2_ESTIMATE,
     OPT_ENABLE_DETAILED_SENSORS,
     PLATFORMS,
@@ -193,7 +194,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
             reauth_password=str(entry.data[CONF_PASSWORD]) if _has_saved_password(entry) else None,
         )
         await _ensure_authenticated(hass, auth, entry)
-        client = KepcoOnClient(auth, clock=dt_util.now)
+        client = KepcoOnClient(
+            auth,
+            clock=dt_util.now,
+            apartment_power_planner_wh=entry.options.get(OPT_APARTMENT_POWER_PLANNER_WH) is True,
+        )
         setup_phase = "account"
         await client.async_get_account_type()
         setup_phase = "customers"

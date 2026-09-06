@@ -4,7 +4,7 @@ from homeassistant.const import CONF_PASSWORD, Platform
 
 DOMAIN = "kepco_on"
 NAME = "KEPCO ON"
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 CONFIG_ENTRY_VERSION = 3
 
 BASE_URL = "https://online.kepco.co.kr"
@@ -52,6 +52,7 @@ OPT_ENABLE_DETAILED_SENSORS = "enable_detailed_sensors"
 OPT_ENABLE_CO2_ESTIMATE = "enable_co2_estimate"
 OPT_CO2_FACTOR_KG_PER_KWH = "co2_factor_kg_per_kwh"
 OPT_HISTORY_MONTHS = "history_months"
+OPT_APARTMENT_POWER_PLANNER_WH = "apartment_power_planner_wh"
 
 CANDIDATE_COOKIE_NAMES: frozenset[str] = frozenset({"JSESSIONID", "kepcoSSO"})
 PERSISTED_COOKIE_ALLOWLIST: frozenset[str] = frozenset()
@@ -90,6 +91,7 @@ __all__ = [
     "ENDPOINT_SESSION_CHECK",
     "ENDPOINT_SSO_CHECK",
     "NAME",
+    "OPT_APARTMENT_POWER_PLANNER_WH",
     "OPT_CO2_FACTOR_KG_PER_KWH",
     "OPT_ENABLE_CO2_ESTIMATE",
     "OPT_ENABLE_DETAILED_SENSORS",

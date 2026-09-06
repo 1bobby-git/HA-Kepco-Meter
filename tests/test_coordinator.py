@@ -151,9 +151,16 @@ class FakeClient:
     customer_results: ClassVar[list[tuple[KepcoCustomer, ...] | Exception]] = []
     bill_results: ClassVar[list[KepcoBill | Exception]] = []
 
-    def __init__(self, auth: FakeAuth, *, clock: Callable[[], datetime] | None = None) -> None:
+    def __init__(
+        self,
+        auth: FakeAuth,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        apartment_power_planner_wh: bool = False,
+    ) -> None:
         self.auth = auth
         self.clock = clock
+        self.apartment_power_planner_wh = apartment_power_planner_wh
         self.bill_calls: list[KepcoCustomer] = []
         FakeClient.instances.append(self)
 
@@ -1168,3 +1175,16 @@ async def test_coordinator_connection_and_rate_limit_raise_update_failed() -> No
 
         with pytest.raises(UpdateFailed):
             await coordinator._async_update_data()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_setup_passes_explicit_apartment_profile_option(enabled: bool) -> None:
+    import custom_components.kepco_on as init_module
+
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    entry.options["apartment_power_planner_wh"] = enabled
+    FakeAuth.login_results = [account_session()]
+    assert await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+    assert FakeClient.instances[0].apartment_power_planner_wh is enabled

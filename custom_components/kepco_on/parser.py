@@ -207,11 +207,15 @@ def parse_power_planner_return_code(payload: dict[str, object]) -> str | None:
     return code
 
 
-def parse_power_planner(payload: dict[str, object]) -> tuple[float | None, float | None]:
+def parse_power_planner(
+    payload: dict[str, object], *, reported_wh: bool = False
+) -> tuple[float | None, float | None]:
     """Parse verified energy data, retaining the legacy two-value interface.
 
     The public page labels PREDICT_TOT as an expected charge, not a verified
-    energy quantity. Do not publish that ambiguous field as kWh.
+    energy quantity. Keep the default conservative. The explicit reported_wh
+    profile uses the account owner's confirmed interpretation for selected
+    apartment contracts, not a universal assertion about the endpoint units.
     """
     result = payload.get("dma_powerPlanner")
     if not isinstance(result, dict):
@@ -221,7 +225,16 @@ def parse_power_planner(payload: dict[str, object]) -> tuple[float | None, float
     current = _parse_float(result.get("F_AP_QT"), "current_period_usage")
     if current is not None and (not math.isfinite(current) or current < 0):
         raise KepcoOnProtocolError("current_period_usage must be finite and nonnegative")
-    return (current, None)
+    if not reported_wh:
+        return (current, None)
+    predicted = _parse_float(result.get("PREDICT_TOT"), "predicted_usage")
+    if predicted is not None and (not math.isfinite(predicted) or predicted < 0):
+        raise KepcoOnProtocolError("predicted_usage must be finite and nonnegative")
+    # Preserve full internal precision; only the display should round values.
+    return (
+        current / 1000 if current is not None else None,
+        predicted / 1000 if predicted is not None else None,
+    )
 
 
 def _parse_float(value: object, field_name: str) -> float | None:

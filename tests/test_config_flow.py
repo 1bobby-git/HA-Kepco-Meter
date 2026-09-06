@@ -825,6 +825,7 @@ async def test_options_flow_accepts_valid_values() -> None:
 
     assert result["type"] == "create_entry"
     assert result["data"] == {
+        "apartment_power_planner_wh": False,
         OPT_POLLING_INTERVAL_HOURS: 12,
         OPT_CO2_FACTOR_KG_PER_KWH: 0.5,
         OPT_HISTORY_MONTHS: 24,

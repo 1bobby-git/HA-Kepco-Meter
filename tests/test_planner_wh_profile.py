@@ -1,0 +1,262 @@
+"""Opt-in apartment unit profile regressions, using synthetic values and IDs."""
+
+from __future__ import annotations
+
+import asyncio
+from dataclasses import replace
+from typing import Any, cast
+from unittest.mock import patch
+
+import pytest
+from custom_components.kepco_on.api import KepcoOnClient
+from custom_components.kepco_on.config_flow import KepcoOnOptionsFlow
+from custom_components.kepco_on.const import (
+    ENDPOINT_MAIN_CHART,
+    ENDPOINT_POWER_PLANNER,
+    OPT_APARTMENT_POWER_PLANNER_WH,
+)
+from custom_components.kepco_on.exceptions import (
+    KepcoOnConnectionError,
+    KepcoOnProtocolError,
+    KepcoOnRateLimitError,
+    KepcoOnSessionExpired,
+)
+from custom_components.kepco_on.parser import parse_power_planner
+
+from .test_apartment_planner import PlannerAuth, customer
+from .test_config_flow import attach_fake_hass, make_entry
+from .test_sensor import bill as synthetic_bill
+from .test_sensor import by_key, setup_entities
+
+
+def planner(current: object, predicted: object, code: str = "00") -> dict[str, object]:
+    return {"dma_powerPlanner": {"F_AP_QT": current, "PREDICT_TOT": predicted, "RETURN_CD": code}}
+
+
+@pytest.mark.parametrize(
+    "values", [(234560, 1287650), ("234560", "1287650"), ("234,560", "1,287,650")]
+)
+def test_wh_profile_scales_once_without_internal_rounding(values: tuple[object, object]) -> None:
+    assert parse_power_planner(planner(*values), reported_wh=True) == pytest.approx(
+        (234.56, 1287.65)
+    )
+    assert parse_power_planner(planner("1234.56", "9876.54"), reported_wh=True) == pytest.approx(
+        (1.23456, 9.87654)
+    )
+
+
+@pytest.mark.parametrize(
+    ("values", "expected"),
+    [
+        ((0, "0"), (0.0, 0.0)),
+        ((None, 3000), (None, 3.0)),
+        ((4000, None), (4.0, None)),
+        ((None, None), (None, None)),
+    ],
+)
+def test_zero_and_independent_nulls(
+    values: tuple[object, object], expected: tuple[float | None, float | None]
+) -> None:
+    assert parse_power_planner(planner(*values), reported_wh=True) == expected
+
+
+@pytest.mark.parametrize("code", ["90", "01", "99"])
+def test_provider_failures_are_not_bypassed(code: str) -> None:
+    assert parse_power_planner(planner(234560, 1287650, code), reported_wh=True) == (None, None)
+
+
+@pytest.mark.parametrize("value", [True, "NaN", "Infinity", "-Infinity", -1, "bad", [], 10**400])
+@pytest.mark.parametrize("field", ["F_AP_QT", "PREDICT_TOT"])
+def test_invalid_numbers_are_rejected(value: object, field: str) -> None:
+    payload = planner(1000, 2000)
+    cast("dict[str, object]", payload["dma_powerPlanner"])[field] = value
+    with pytest.raises((KepcoOnProtocolError, OverflowError)):
+        parse_power_planner(payload, reported_wh=True)
+
+
+def test_default_does_not_guess_unit_from_magnitude() -> None:
+    assert parse_power_planner(planner(234560, 1287650)) == (234560.0, None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("contract", ["아파트(종합계약)", "아파트(종합계약/나)"])
+async def test_comprehensive_profile_exact_request_and_values(contract: str) -> None:
+    auth = PlannerAuth(planner(234560, 1287650))
+    base = synthetic_bill()
+    with patch("custom_components.kepco_on.api.parse_bill", return_value=base):
+        result = await KepcoOnClient(
+            cast("Any", auth), apartment_power_planner_wh=True
+        ).async_get_bill(customer(contract))
+    assert len(auth.calls) == 2
+    assert auth.calls[-1] == (
+        ENDPOINT_POWER_PLANNER,
+        {
+            "dma_search": {
+                "schYm": "",
+                "custNo": "TEST_BUILDING",
+                "gubun": "",
+                "schChart": "12",
+                "CUST_NO": "",
+                "housCntrNo": "TEST_HOUSEHOLD",
+                "yyyymm": "",
+                "searchType": "",
+                "dong": "",
+                "ho": "",
+                "months": "",
+                "chgYmd": "",
+            }
+        },
+        "mf_wfm_layout_sbm_powerPlanner",
+    )
+    assert result.current_period_usage_kwh == pytest.approx(234.56)
+    assert result.predicted_period_usage_kwh == pytest.approx(1287.65)
+    assert result.power_planner_profile == "user_confirmed_apartment_wh"
+    assert result.power_planner_status == "ok"
+    assert result.power_planner_return_code == "00"
+    assert result.usage_kwh == base.usage_kwh
+    assert result.history == base.history
+
+
+@pytest.mark.asyncio
+async def test_single_contract_is_unchanged_even_with_account_option() -> None:
+    auth = PlannerAuth(planner(123.45, 90000))
+    with patch("custom_components.kepco_on.api.parse_bill", return_value=synthetic_bill()):
+        result = await KepcoOnClient(
+            cast("Any", auth), apartment_power_planner_wh=True
+        ).async_get_bill(customer("아파트(단일계약)"))
+    search = cast("dict[str, object]", cast("dict[str, object]", auth.calls[-1][1])["dma_search"])
+    assert search["custNo"] == "TEST_HOUSEHOLD"
+    assert search["housCntrNo"] == ""
+    assert search["chgYmd"] == "20260409"
+    assert result.current_period_usage_kwh == pytest.approx(123.45)
+    assert result.predicted_period_usage_kwh is None
+    assert result.power_planner_profile == "default"
+
+
+@pytest.mark.asyncio
+async def test_house_contract_request_and_unit_are_unchanged() -> None:
+    from .test_api_house import _house_customer, _load_fixture
+
+    class HouseAuth:
+        async def async_protected_request(
+            self, path: str, payload: dict[str, object] | None, *, submission_id: str | None = None
+        ) -> dict[str, object]:
+            if path == ENDPOINT_MAIN_CHART:
+                return _load_fixture("house_main_chart.json")
+            assert path == ENDPOINT_POWER_PLANNER
+            search = cast("dict[str, object]", cast("dict[str, object]", payload)["dma_search"])
+            assert search["custNo"] == "TEST_SI_CUST_001"
+            assert search["housCntrNo"] == ""
+            assert search["chgYmd"] == "20260409"
+            return planner(12.345, 98765)
+
+    result = await KepcoOnClient(
+        cast("Any", HouseAuth()), apartment_power_planner_wh=True
+    ).async_get_bill(_house_customer())
+    assert result.current_period_usage_kwh == pytest.approx(12.345)
+    assert result.predicted_period_usage_kwh is None
+    assert result.power_planner_profile == "default"
+
+
+@pytest.mark.asyncio
+async def test_historical_queries_never_call_current_planner() -> None:
+    auth = PlannerAuth(AssertionError("must not request current data"))
+    base = synthetic_bill()
+    with patch("custom_components.kepco_on.api.parse_bill", return_value=base):
+        result = await KepcoOnClient(
+            cast("Any", auth), apartment_power_planner_wh=True
+        ).async_get_bill(customer(), "202607")
+    assert result is base
+    assert len(auth.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (KepcoOnConnectionError, "connection_error"),
+        (KepcoOnProtocolError, "invalid_response"),
+        (KepcoOnRateLimitError, "rate_limited"),
+    ],
+)
+async def test_optional_failures_preserve_billing(error: type[Exception], status: str) -> None:
+    auth = PlannerAuth(error("synthetic failure"))
+    base = synthetic_bill()
+    with patch("custom_components.kepco_on.api.parse_bill", return_value=base):
+        result = await KepcoOnClient(
+            cast("Any", auth), apartment_power_planner_wh=True
+        ).async_get_bill(customer())
+    assert result.usage_kwh == base.usage_kwh
+    assert result.power_planner_profile == "user_confirmed_apartment_wh"
+    assert result.power_planner_status == status
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("error", [KepcoOnSessionExpired, asyncio.CancelledError])
+async def test_auth_and_cancellation_errors_propagate(error: type[BaseException]) -> None:
+    auth = PlannerAuth(error("synthetic failure"))
+    with (
+        patch("custom_components.kepco_on.api.parse_bill", return_value=synthetic_bill()),
+        pytest.raises(error),
+    ):
+        await KepcoOnClient(cast("Any", auth), apartment_power_planner_wh=True).async_get_bill(
+            customer()
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("values", [(0.0, 0.0), (234.56, 1287.65), (None, 5.0), (4.0, None)])
+async def test_entities_preserve_ids_and_report_correct_field_status(
+    values: tuple[float | None, float | None],
+) -> None:
+    item = customer()
+    result = replace(
+        synthetic_bill(),
+        current_period_usage_kwh=values[0],
+        predicted_period_usage_kwh=values[1],
+        power_planner_status="ok",
+        power_planner_return_code="00",
+        power_planner_profile="user_confirmed_apartment_wh",
+    )
+    sensors = by_key(
+        await setup_entities(customers=(item,), bills_by_customer_key={item.stable_key: result})
+    )
+    for key, value in zip(("current_period_usage", "predicted_period_usage"), values, strict=True):
+        entity = sensors[key]
+        assert entity.native_value == value
+        assert entity.available is (value is not None)
+        assert entity.unique_id == f"{item.stable_key}_{key}"
+        attrs = entity.extra_state_attributes
+        assert attrs["data_status"] == ("ok" if value is not None else "no_data")
+        assert attrs["return_code"] == attrs["provider_return_code"] == "00"
+        assert attrs["unit_basis"] == "user_confirmed"
+        assert attrs["unit_conversion_divisor"] == 1000
+        assert "TEST_BUILDING" not in repr(attrs)
+        assert "TEST_HOUSEHOLD" not in repr(attrs)
+        assert entity.entity_description.suggested_display_precision == 2
+    assert sensors["monthly_usage"].available is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_option_save_toggle_and_omitted_input(enabled: bool) -> None:
+    entry = make_entry()
+    entry.options = {OPT_APARTMENT_POWER_PLANNER_WH: enabled}
+    flow = KepcoOnOptionsFlow(cast("Any", entry))
+    attach_fake_hass(flow)
+    shown = await flow.async_step_init()
+    assert shown["type"] == "form"
+    assert shown["data_schema"] is not None
+    assert shown["data_schema"]({})[OPT_APARTMENT_POWER_PLANNER_WH] is enabled
+    saved = await flow.async_step_init({})
+    assert saved["data"][OPT_APARTMENT_POWER_PLANNER_WH] is enabled
+    toggled = await flow.async_step_init({OPT_APARTMENT_POWER_PLANNER_WH: not enabled})
+    assert toggled["data"][OPT_APARTMENT_POWER_PLANNER_WH] is not enabled
+
+
+@pytest.mark.parametrize("value", ["false", "true", 0, 1, None, []])
+def test_non_boolean_option_is_rejected(value: object) -> None:
+    flow = KepcoOnOptionsFlow(cast("Any", make_entry()))
+    options, error = flow._validate_options({OPT_APARTMENT_POWER_PLANNER_WH: value})
+    assert options == {}
+    assert error == "invalid_planner_profile"

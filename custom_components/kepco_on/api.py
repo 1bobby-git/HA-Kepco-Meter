@@ -293,9 +293,11 @@ class KepcoOnClient:
         auth: KepcoAuthProvider,
         *,
         clock: ClockCallback = dt_util.now,
+        apartment_power_planner_wh: bool = False,
     ) -> None:
         self._auth = auth
         self._clock = clock
+        self._apartment_power_planner_wh = apartment_power_planner_wh
 
     async def async_get_account_type(self) -> str:
         """Return the account type if it is a supported individual account."""
@@ -398,6 +400,19 @@ class KepcoOnClient:
             "months": "",
             "chgYmd": customer.change_ymd,
         }
+        # Explicit account-owner opt-in: this reproduces the reported working
+        # comprehensive-contract request, not a universal endpoint unit rule.
+        reported_wh = self._apartment_power_planner_wh and customer.contract_method in {
+            "아파트(종합계약)",
+            "아파트(종합계약/나)",
+        }
+        if reported_wh:
+            search.update(
+                custNo=customer.customer_number,
+                housCntrNo=customer.house_contract_number,
+                chgYmd="",
+            )
+            bill = dataclasses.replace(bill, power_planner_profile="user_confirmed_apartment_wh")
         try:
             payload = await self._auth.async_protected_request(
                 ENDPOINT_POWER_PLANNER,
@@ -405,7 +420,7 @@ class KepcoOnClient:
                 submission_id="mf_wfm_layout_sbm_powerPlanner",
             )
             code = parse_power_planner_return_code(payload)
-            current, predicted = parse_power_planner(payload)
+            current, predicted = parse_power_planner(payload, reported_wh=reported_wh)
         except KepcoOnRateLimitError:
             return dataclasses.replace(bill, power_planner_status="rate_limited")
         except KepcoOnConnectionError:
@@ -417,7 +432,9 @@ class KepcoOnClient:
             bill,
             current_period_usage_kwh=current,
             predicted_period_usage_kwh=predicted,
-            power_planner_status="ok" if current is not None else "no_data",
+            power_planner_status=(
+                "ok" if current is not None or predicted is not None else "no_data"
+            ),
             power_planner_return_code=code,
         )
 

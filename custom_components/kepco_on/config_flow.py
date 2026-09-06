@@ -33,6 +33,7 @@ from .const import (
     DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DEFAULT_POLLING_INTERVAL_HOURS,
     DOMAIN,
+    OPT_APARTMENT_POWER_PLANNER_WH,
     OPT_CO2_FACTOR_KG_PER_KWH,
     OPT_HISTORY_MONTHS,
     OPT_POLLING_INTERVAL_HOURS,
@@ -552,6 +553,10 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
         options = self._config_entry.options
         return vol.Schema(
             {
+                vol.Optional(
+                    OPT_APARTMENT_POWER_PLANNER_WH,
+                    default=options.get(OPT_APARTMENT_POWER_PLANNER_WH, False),
+                ): bool,
                 vol.Required(
                     OPT_POLLING_INTERVAL_HOURS,
                     default=str(
@@ -619,8 +624,15 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
             return {}, "invalid_history_months"
         if not 1 <= history_months <= 24:
             return {}, "invalid_history_months"
+        reported_wh = user_input.get(
+            OPT_APARTMENT_POWER_PLANNER_WH,
+            self._config_entry.options.get(OPT_APARTMENT_POWER_PLANNER_WH, False),
+        )
+        if not isinstance(reported_wh, bool):
+            return {}, "invalid_planner_profile"
         return (
             {
+                OPT_APARTMENT_POWER_PLANNER_WH: reported_wh,
                 OPT_POLLING_INTERVAL_HOURS: interval,
                 OPT_CO2_FACTOR_KG_PER_KWH: co2_factor,
                 OPT_HISTORY_MONTHS: history_months,

@@ -74,12 +74,14 @@
         "data": {
           "polling_interval_hours": "Polling interval",
           "co2_factor_kg_per_kwh": "CO2 factor (kg/kWh)",
-          "history_months": "History months"
+          "history_months": "History months",
+          "apartment_power_planner_wh": "Comprehensive apartment: user-confirmed Wh response"
         },
         "data_description": {
           "polling_interval_hours": "Hours between KEPCO ON updates.",
           "co2_factor_kg_per_kwh": "Positive decimal factor up to 10 used for all three emission sensors.",
-          "history_months": "Number of months returned by the usage-history action."
+          "history_months": "Number of months returned by the usage-history action.",
+          "apartment_power_planner_wh": "Enable only after confirming both fields represent Wh energy for your account. For comprehensive apartments only, send both customer and household IDs and divide both values by 1000. Off by default; not a universal KEPCO unit declaration."
         }
       }
     },
@@ -87,7 +89,8 @@
       "invalid_selection": "Select at least one valid customer.",
       "invalid_co2_factor": "CO2 factor must be greater than 0 and no more than 10.",
       "invalid_history_months": "History months must be from 1 to 24.",
-      "unknown": "Unexpected error."
+      "unknown": "Unexpected error.",
+      "invalid_planner_profile": "The Power Planner Wh setting must be on or off."
     }
   },
   "services": {

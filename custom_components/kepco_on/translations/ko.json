@@ -74,12 +74,14 @@
         "data": {
           "polling_interval_hours": "조회 주기",
           "co2_factor_kg_per_kwh": "온실가스 환산계수 (kg CO₂/kWh)",
-          "history_months": "이력 개월 수"
+          "history_months": "이력 개월 수",
+          "apartment_power_planner_wh": "종합계약: 사용자 확인 Wh 응답 사용"
         },
         "data_description": {
           "polling_interval_hours": "한전ON 업데이트 사이의 시간입니다.",
           "co2_factor_kg_per_kwh": "세 개의 배출량 센서에 공통 적용되는 10 이하의 양수 소수 계수입니다.",
-          "history_months": "사용량 이력 조회 액션이 반환할 개월 수입니다."
+          "history_months": "사용량 이력 조회 액션이 반환할 개월 수입니다.",
+          "apartment_power_planner_wh": "본인 계정에서 F_AP_QT와 PREDICT_TOT가 Wh 사용량임을 확인한 경우만 켜세요. 종합계약에 한해 고객번호·세대계약번호를 함께 보내고 두 값을 1000으로 나눕니다. 기본값은 꺼짐이며 모든 계정의 공식 단위를 의미하지 않습니다."
         }
       }
     },
@@ -87,7 +89,8 @@
       "invalid_selection": "올바른 고객을 하나 이상 선택하세요.",
       "invalid_co2_factor": "CO2 계수는 0보다 크고 10 이하여야 합니다.",
       "invalid_history_months": "이력 개월 수는 1부터 24 사이여야 합니다.",
-      "unknown": "예상하지 못한 오류입니다."
+      "unknown": "예상하지 못한 오류입니다.",
+      "invalid_planner_profile": "파워플래너 Wh 응답 설정은 켜짐 또는 꺼짐이어야 합니다."
     }
   },
   "services": {

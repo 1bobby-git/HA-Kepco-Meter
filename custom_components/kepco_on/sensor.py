@@ -323,6 +323,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=lambda bill, options: bill.current_period_usage_kwh,
+        suggested_display_precision=2,
     ),
     KepcoSensorEntityDescription(
         key="predicted_period_usage",
@@ -331,6 +332,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=lambda bill, options: bill.predicted_period_usage_kwh,
+        suggested_display_precision=2,
     ),
 )
 
@@ -597,10 +599,15 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         key = self.entity_description.key
         if key in POWER_PLANNER_FIELDS:
             status = bill.power_planner_status
-            if key == "predicted_period_usage" and (
-                status == "ok" or bill.power_planner_return_code == "00"
+            reported_wh = bill.power_planner_profile == "user_confirmed_apartment_wh"
+            if (
+                key == "predicted_period_usage"
+                and not reported_wh
+                and (status == "ok" or bill.power_planner_return_code == "00")
             ):
                 status = "source_unit_unverified"
+            elif status == "ok" and self.native_value is None:
+                status = "no_data"
             # Billing dates describe a past bill, not the current planner period.
             return {
                 "data_source": "kepco_power_planner",
@@ -608,6 +615,10 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
                 "data_status": status,
                 "data_status_message": POWER_PLANNER_MESSAGES.get(status, status),
                 "return_code": bill.power_planner_return_code,
+                "provider_return_code": bill.power_planner_return_code,
+                "response_profile": bill.power_planner_profile,
+                "unit_basis": "user_confirmed" if reported_wh else "default",
+                "unit_conversion_divisor": 1000 if reported_wh else None,
             }
         offset = self.entity_description.history_month_offset
         billing_month = (
