@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from datetime import date
 from hashlib import sha256
@@ -15,6 +16,9 @@ from .models import (
 )
 
 SUPPORTED_APARTMENT_CONTRACT = "아파트(단일계약)"
+SUPPORTED_APARTMENT_CONTRACTS = frozenset(
+    {SUPPORTED_APARTMENT_CONTRACT, "아파트(종합계약)", "아파트(종합계약/나)"}
+)
 SUPPORTED_HOUSE_CONTRACT_PREFIX = "주택용"
 HOUSE_PERIOD_PATTERN = re.compile(
     r"([0-9]{4})\.([0-9]{2})\.([0-9]{2})-([0-9]{4})\.([0-9]{2})\.([0-9]{2})"
@@ -136,13 +140,14 @@ def parse_customers(payload: dict[str, object], account_uid_hash: str) -> tuple[
                 dong=_optional_str(row, "APT_DONGNO") or "미확인",
                 ho=_optional_str(row, "APT_HONO") or "미확인",
                 contract_method=contract_method,
-                is_supported=contract_method == SUPPORTED_APARTMENT_CONTRACT,
+                is_supported=contract_method in SUPPORTED_APARTMENT_CONTRACTS,
                 _customer_number=customer_number,
                 _house_contract_number=house_contract_number,
+                _change_ymd=_optional_str(row, "DC_USER_CHG_NM_YMD") or "",
             )
         )
         if not customers[index].is_supported:
-            raise KepcoOnProtocolError("Only apartment single-contract customers are supported")
+            raise KepcoOnProtocolError("Only supported apartment contracts are accepted")
     return tuple(customers)
 
 
@@ -187,15 +192,36 @@ def parse_house_bill(payload: dict[str, object]) -> KepcoBill:
     )
 
 
+def parse_power_planner_return_code(payload: dict[str, object]) -> str | None:
+    """Return only a bounded numeric status, never arbitrary server text."""
+    result = payload.get("dma_powerPlanner")
+    if result is None:
+        return None
+    if not isinstance(result, dict):
+        raise KepcoOnProtocolError("Power Planner result must be an object")
+    code = result.get("RETURN_CD")
+    if code is None or code == "":
+        return None
+    if not isinstance(code, str) or re.fullmatch(r"[0-9]{2}", code) is None:
+        raise KepcoOnProtocolError("Power Planner RETURN_CD is invalid")
+    return code
+
+
 def parse_power_planner(payload: dict[str, object]) -> tuple[float | None, float | None]:
-    """Parse 파워플래너 현재 검침기간 누적/예측 사용량 (kWh)."""
+    """Parse verified energy data, retaining the legacy two-value interface.
+
+    The public page labels PREDICT_TOT as an expected charge, not a verified
+    energy quantity. Do not publish that ambiguous field as kWh.
+    """
     result = payload.get("dma_powerPlanner")
     if not isinstance(result, dict):
         return (None, None)
-    return (
-        _parse_float(result.get("F_AP_QT"), "current_period_usage"),
-        _parse_float(result.get("PREDICT_TOT"), "predicted_usage"),
-    )
+    if parse_power_planner_return_code(payload) not in (None, "00"):
+        return (None, None)
+    current = _parse_float(result.get("F_AP_QT"), "current_period_usage")
+    if current is not None and (not math.isfinite(current) or current < 0):
+        raise KepcoOnProtocolError("current_period_usage must be finite and nonnegative")
+    return (current, None)
 
 
 def _parse_float(value: object, field_name: str) -> float | None:
@@ -425,5 +451,6 @@ __all__ = [
     "parse_house_bill",
     "parse_int",
     "parse_power_planner",
+    "parse_power_planner_return_code",
     "parse_year_month",
 ]

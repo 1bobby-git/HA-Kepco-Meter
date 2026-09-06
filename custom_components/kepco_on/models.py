@@ -164,6 +164,8 @@ class KepcoBill:
     history: tuple[KepcoUsageHistoryPoint, ...] = ()
     current_period_usage_kwh: float | None = None
     predicted_period_usage_kwh: float | None = None
+    power_planner_status: str = "not_requested"
+    power_planner_return_code: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
