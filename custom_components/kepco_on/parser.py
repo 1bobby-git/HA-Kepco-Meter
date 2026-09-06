@@ -207,11 +207,15 @@ def parse_power_planner_return_code(payload: dict[str, object]) -> str | None:
     return code
 
 
-def parse_power_planner(payload: dict[str, object]) -> tuple[float | None, float | None]:
+def parse_power_planner(
+    payload: dict[str, object], *, current_unit_wh: bool = False
+) -> tuple[float | None, float | None]:
     """Parse verified energy data, retaining the legacy two-value interface.
 
     The public page labels PREDICT_TOT as an expected charge, not a verified
     energy quantity. Do not publish that ambiguous field as kWh.
+    current_unit_wh is explicitly selected only for the reported combined-contract
+    profile; never infer units from a value's magnitude or integer/float type.
     """
     result = payload.get("dma_powerPlanner")
     if not isinstance(result, dict):
@@ -221,6 +225,8 @@ def parse_power_planner(payload: dict[str, object]) -> tuple[float | None, float
     current = _parse_float(result.get("F_AP_QT"), "current_period_usage")
     if current is not None and (not math.isfinite(current) or current < 0):
         raise KepcoOnProtocolError("current_period_usage must be finite and nonnegative")
+    if current is not None and current_unit_wh:
+        current /= 1000
     return (current, None)
 
 
