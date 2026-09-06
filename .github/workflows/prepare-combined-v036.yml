@@ -1,0 +1,96 @@
+name: Verify combined-contract v0.3.6
+on:
+  push:
+    branches:
+      - work/kepco-combined-v036-20260906
+permissions:
+  contents: write
+concurrency:
+  group: combined-contract-v036
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out patch sources
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: patch-source
+          persist-credentials: false
+      - name: Check out inspected baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: f1737d9f5060855baa1f004cae4dacbb207098b5
+          fetch-depth: 0
+          path: repo
+      - name: Prepare scoped changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd repo
+          git switch -c fix/kepco-combined-request-v0.3.6
+          python ../patch-source/.maintenance/prepare_v036.py
+          cp ../patch-source/.maintenance/test_combined_planner_regression.py tests/
+          git diff --check
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.14.4'
+          cache: pip
+          cache-dependency-path: repo/requirements_test.txt
+      - name: Install Python dependencies
+        working-directory: repo
+        run: python -m pip install -r requirements_test.txt
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.20.0'
+          cache: npm
+          cache-dependency-path: repo/package-lock.json
+      - name: Verify Node tools
+        working-directory: repo
+        run: |
+          npm ci
+          npm run test:login-schema
+          npm audit --audit-level=moderate
+      - name: Format touched sources and validate all Python
+        working-directory: repo
+        run: |
+          python -m ruff check --select I --fix custom_components/kepco_on/api.py custom_components/kepco_on/parser.py custom_components/kepco_on/sensor.py custom_components/kepco_on/const.py tests/test_apartment_planner.py tests/test_combined_planner_regression.py
+          python -m ruff format custom_components/kepco_on/api.py custom_components/kepco_on/parser.py custom_components/kepco_on/sensor.py custom_components/kepco_on/const.py tests/test_apartment_planner.py tests/test_combined_planner_regression.py
+          python -m ruff format --check .
+          python -m ruff check .
+          python -m mypy
+      - name: Run full regression suite
+        working-directory: repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest --junitxml=/tmp/kepco-v036-tests.xml --cov=custom_components.kepco_on --cov-report=term-missing --cov-report=json:/tmp/kepco-v036-coverage.json --cov-fail-under=95 | tee /tmp/kepco-v036-tests.log
+      - name: Publish only tested source changes
+        working-directory: repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add README.md RELEASE_NOTES.md CHANGELOG.md docs/PROTOCOL.md pyproject.toml custom_components/kepco_on/api.py custom_components/kepco_on/parser.py custom_components/kepco_on/sensor.py custom_components/kepco_on/const.py custom_components/kepco_on/manifest.json tests/test_api.py tests/test_auth.py tests/test_diagnostics.py tests/test_scaffold.py tests/test_apartment_planner.py tests/test_combined_planner_regression.py
+          test "$(git diff --cached --name-only | wc -l)" -eq 16
+          git diff --cached > /tmp/kepco-v036.patch
+          git commit -m 'fix: restore reported combined-contract planner request for v0.3.6'
+          git archive --format=zip --output=/tmp/kepco-v036-source.zip HEAD
+          git push origin HEAD:refs/heads/fix/kepco-combined-request-v0.3.6
+      - name: Preserve verification results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kepco-v036-verification
+          path: |
+            /tmp/kepco-v036-tests.xml
+            /tmp/kepco-v036-tests.log
+            /tmp/kepco-v036-coverage.json
+            /tmp/kepco-v036.patch
+            /tmp/kepco-v036-source.zip
+          retention-days: 7
