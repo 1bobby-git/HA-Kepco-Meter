@@ -44,13 +44,17 @@ jobs:
       - name: Format and lint
         working-directory: repo
         run: |
-          python -m ruff check --fix .
+          set -euo pipefail
+          python -m ruff format .
+          python -m ruff check --fix . | tee ../wh-lint.txt
           python -m ruff format .
           python -m ruff check .
           python -m ruff format --check .
       - name: Type check
         working-directory: repo
-        run: python -m mypy
+        run: |
+          set -euo pipefail
+          python -m mypy | tee ../wh-types.txt
       - name: Run complete tests
         working-directory: repo
         run: |
@@ -92,4 +96,6 @@ jobs:
             wh-junit.xml
             wh-final.patch
             wh-source.zip
+            wh-lint.txt
+            wh-types.txt
           retention-days: 3
