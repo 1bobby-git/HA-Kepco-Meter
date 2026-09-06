@@ -1,0 +1,22 @@
+name: Export planner source
+on:
+  push:
+    branches: [work/kepco-apartment-planner-20260906]
+    paths: [.github/workflows/export-planner-source.yml]
+permissions:
+  contents: read
+jobs:
+  export:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: efa5d0ba838b61dda43c078dc5533794302e722a
+          persist-credentials: false
+      - run: git archive --format=zip --output=planner-source.zip HEAD
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: planner-source
+          path: planner-source.zip
+          retention-days: 1
