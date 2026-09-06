@@ -1,0 +1,88 @@
+name: Publish verified KEPCO 0.3.4
+on:
+  push:
+    branches: [release/optimization-20260906]
+    paths: [.github/workflows/publish-verified-kepco-034.yml]
+permissions:
+  contents: write
+  actions: read
+concurrency:
+  group: deploy-optimization-20260906
+  cancel-in-progress: false
+jobs:
+  verify-and-publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: efa5d0ba838b61dda43c078dc5533794302e722a
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify passed gates, exact source and uploaded bytes before publishing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 - <<'PY'
+          import hashlib, io, json, os, subprocess, time, zipfile
+          from pathlib import Path
+          repo = '1bobby-git/HA-Kepco-Meter'
+          sha = 'efa5d0ba838b61dda43c078dc5533794302e722a'
+          release_id = 383409930
+          def api(path):
+              return json.loads(subprocess.check_output(['gh', 'api', '--method', 'GET', f'repos/{repo}/{path}', '-H', 'Cache-Control: no-cache']))
+          assert os.environ['GITHUB_REPOSITORY'] == repo
+          assert subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip() == sha
+          assert subprocess.check_output(['git', 'rev-parse', 'v0.3.4^{commit}'], text=True).strip() == sha
+          assert api('branches/main')['commit']['sha'] == sha
+          jobs = api('actions/runs/33999966164/jobs')['jobs']
+          job = next(j for j in jobs if j['id'] == 101397033269)
+          assert job['head_sha'] == '824f931fc0f6c4e4f510a538dcf02832104cc6e5'
+          steps = {s['name']: s['conclusion'] for s in job['steps']}
+          for name in ['Check current source, versions and branch protections', 'Run npm run test:login-schema', 'Run npm audit --audit-level=moderate', 'Validate unchanged source with every native gate', 'Validate patched source with every native gate', 'HACS validation', 'Hassfest validation']:
+              assert steps.get(name) == 'success', name
+          release = api(f'releases/{release_id}')
+          assert release['tag_name'] == 'v0.3.4' and not release['prerelease']
+          assert sha in release['body'] and "'tests': 407, 'failures': 0, 'errors': 0" in release['body']
+          assets = {a['name']: a for a in release['assets']}
+          expected = {'kepco_on.zip': (281445, '936c007d599e88ba755de836415ac675069e6151f9c3b6fb81c44eaf0cf7852e'), 'SHA256SUMS.txt': (79, '1d4d8d1f276f281722ffcbbe0a97f2c3a3c3923e2493380cbdac87c2d680afd6')}
+          assert set(assets) == set(expected)
+          downloaded = {}
+          for name, (size, digest) in expected.items():
+              asset = assets[name]
+              assert asset['state'] == 'uploaded' and asset['size'] == size
+              assert asset['digest'] == 'sha256:' + digest
+              data = subprocess.check_output(['gh', 'api', f'repos/{repo}/releases/assets/{asset["id"]}', '-H', 'Accept: application/octet-stream'])
+              assert len(data) == size and hashlib.sha256(data).hexdigest() == digest, name
+              downloaded[name] = data
+          assert downloaded['SHA256SUMS.txt'].decode() == expected['kepco_on.zip'][1] + '  kepco_on.zip\n'
+          component = Path('custom_components/kepco_on')
+          tracked = subprocess.check_output(['git', 'ls-files', '-z', '--', str(component)]).decode().split('\0')
+          files = {Path(n).relative_to(component).as_posix(): Path(n) for n in tracked if n and Path(n).is_file() and not Path(n).is_symlink() and '__pycache__' not in Path(n).parts and Path(n).suffix not in {'.pyc', '.pyo'}}
+          with zipfile.ZipFile(io.BytesIO(downloaded['kepco_on.zip'])) as archive:
+              assert archive.testzip() is None
+              assert len(archive.namelist()) == len(files) and set(archive.namelist()) == set(files)
+              for name, path in files.items():
+                  assert archive.read(name) == path.read_bytes(), name
+              assert json.loads(archive.read('manifest.json'))['version'] == '0.3.4'
+          if release['draft']:
+              payload = json.dumps({'draft': False, 'prerelease': False, 'make_latest': 'true'})
+              subprocess.run(['gh', 'api', '--method', 'PATCH', f'repos/{repo}/releases/{release_id}', '--input', '-'], input=payload, text=True, check=True, stdout=subprocess.DEVNULL)
+          for attempt in range(6):
+              public = api(f'releases/{release_id}')
+              latest = api('releases/latest')
+              if not public['draft'] and public['published_at'] and latest['id'] == release_id:
+                  break
+              time.sleep(2)
+          else:
+              raise RuntimeError('Public latest release not verified')
+          assert public['tag_name'] == 'v0.3.4' and not public['prerelease']
+          assert api('branches/main')['commit']['sha'] == sha
+          result = {'repository': repo, 'tag': 'v0.3.4', 'commit': sha, 'release_id': release_id, 'url': public['html_url'], 'validation_run': 33999966164, 'baseline_tests': 400, 'patched_tests': 407, 'assets_verified_against_tagged_source': True, 'published_at': public['published_at'], 'live_ha_validated': False}
+          Path(os.environ['RUNNER_TEMP'], 'verified-publication.json').write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
+          print(json.dumps(result, ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: verified-kepco-publication
+          path: ${{ runner.temp }}/verified-publication.json
