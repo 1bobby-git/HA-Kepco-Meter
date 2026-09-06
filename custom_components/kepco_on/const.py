@@ -4,8 +4,10 @@ from homeassistant.const import CONF_PASSWORD, Platform
 
 DOMAIN = "kepco_on"
 NAME = "KEPCO ON"
-VERSION = "0.3.5"
+VERSION = "0.3.6"
 CONFIG_ENTRY_VERSION = 3
+# Scope the user-reported request and Wh conversion to the exact tested contract.
+COMBINED_APARTMENT_PLANNER_CONTRACT = "아파트(종합계약)"
 
 BASE_URL = "https://online.kepco.co.kr"
 PAGE_URL = "https://online.kepco.co.kr/MYM001D00"
@@ -59,6 +61,7 @@ PERSISTED_COOKIE_ALLOWLIST: frozenset[str] = frozenset()
 __all__ = [
     "BASE_URL",
     "CANDIDATE_COOKIE_NAMES",
+    "COMBINED_APARTMENT_PLANNER_CONTRACT",
     "CONFIG_ENTRY_VERSION",
     "CONF_ACCOUNT_UID_HASH",
     "CONF_CUSTOMERS",

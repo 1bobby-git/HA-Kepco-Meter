@@ -25,7 +25,14 @@ from homeassistant.helpers.entity_registry import RegistryEntry, RegistryEntryDi
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import KepcoOnConfigEntry
-from .const import DEFAULT_CO2_FACTOR_KG_PER_KWH, DOMAIN, OPT_CO2_FACTOR_KG_PER_KWH, PAGE_URL
+from .const import (
+    COMBINED_APARTMENT_PLANNER_CONTRACT,
+    DEFAULT_CO2_FACTOR_KG_PER_KWH,
+    DOMAIN,
+    OPT_CO2_FACTOR_KG_PER_KWH,
+    PAGE_URL,
+    VERSION,
+)
 from .coordinator import KepcoOnDataUpdateCoordinator
 from .models import KepcoBill, KepcoCustomer
 
@@ -598,9 +605,10 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         if key in POWER_PLANNER_FIELDS:
             status = bill.power_planner_status
             if key == "predicted_period_usage" and (
-                status == "ok" or bill.power_planner_return_code == "00"
+                status == "ok" or (status == "no_data" and bill.power_planner_return_code == "00")
             ):
                 status = "source_unit_unverified"
+            combined = self.customer.contract_method == COMBINED_APARTMENT_PLANNER_CONTRACT
             # Billing dates describe a past bill, not the current planner period.
             return {
                 "data_source": "kepco_power_planner",
@@ -608,6 +616,14 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
                 "data_status": status,
                 "data_status_message": POWER_PLANNER_MESSAGES.get(status, status),
                 "return_code": bill.power_planner_return_code,
+                "provider_return_code": bill.power_planner_return_code,
+                "integration_version": VERSION,
+                "request_variant": (
+                    "apartment_customer_and_contract" if combined else "household_and_change_date"
+                ),
+                "value_divisor": (
+                    (1000 if combined else 1) if key == "current_period_usage" else None
+                ),
             }
         offset = self.entity_description.history_month_offset
         billing_month = (

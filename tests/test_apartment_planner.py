@@ -105,7 +105,7 @@ def test_combined_contract_still_requires_both_identifiers(field: str) -> None:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("contract", CONTRACTS)
-async def test_latest_apartment_planner_uses_household_id_and_full_change_date(
+async def test_latest_apartment_planner_uses_contract_specific_request(
     contract: str,
 ) -> None:
     auth = PlannerAuth(
@@ -133,23 +133,26 @@ async def test_latest_apartment_planner_uses_household_id_and_full_change_date(
             {
                 "dma_search": {
                     "schYm": "",
-                    "custNo": "TEST_HOUSEHOLD",
+                    "custNo": "TEST_BUILDING"
+                    if contract == "아파트(종합계약)"
+                    else "TEST_HOUSEHOLD",
                     "gubun": "",
                     "schChart": "12",
                     "CUST_NO": "",
-                    "housCntrNo": "",
+                    "housCntrNo": "TEST_HOUSEHOLD" if contract == "아파트(종합계약)" else "",
                     "yyyymm": "",
                     "searchType": "",
                     "dong": "",
                     "ho": "",
                     "months": "",
-                    "chgYmd": "20260409",
+                    "chgYmd": "" if contract == "아파트(종합계약)" else "20260409",
                 }
             },
             "mf_wfm_layout_sbm_powerPlanner",
         ),
     ]
-    assert result.current_period_usage_kwh == pytest.approx(123.45)
+    expected_current = 0.12345 if contract == "아파트(종합계약)" else 123.45
+    assert result.current_period_usage_kwh == pytest.approx(expected_current)
     assert result.predicted_period_usage_kwh is None
     assert result.power_planner_status == "ok"
     assert result.power_planner_return_code == "00"
@@ -174,7 +177,9 @@ async def test_historical_apartment_bill_does_not_query_or_mix_current_period() 
 @pytest.mark.parametrize("value", [0, "0", "0.000", 25.5, "1,234.56"])
 async def test_valid_current_usage_including_zero_is_preserved(value: object) -> None:
     result = await fetch_latest({"dma_powerPlanner": {"RETURN_CD": "00", "F_AP_QT": value}})
-    assert result.current_period_usage_kwh == pytest.approx(float(str(value).replace(",", "")))
+    assert result.current_period_usage_kwh == pytest.approx(
+        float(str(value).replace(",", "")) / 1000
+    )
     assert result.power_planner_status == "ok"
     assert result.predicted_period_usage_kwh is None
 

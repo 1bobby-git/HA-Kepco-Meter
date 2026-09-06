@@ -15,6 +15,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     BASE_URL,
+    COMBINED_APARTMENT_PLANNER_CONTRACT,
     ENDPOINT_APT_BILL_DETAIL,
     ENDPOINT_CUST_NO_LIST,
     ENDPOINT_IS_CORP,
@@ -382,11 +383,12 @@ class KepcoOnClient:
         self, bill: KepcoBill, customer: KepcoCustomer
     ) -> KepcoBill:
         """Enrich a current bill without losing billing data on optional failures."""
-        # MYM001D00.xml dataInit executes the planner with SI_CUST_NO before
-        # replacing custNo with the apartment's CUST_NO for billing requests.
+        # The combined-contract account was reported to work with both IDs.
+        # Keep the v0.3.5 request for other contracts pending separate evidence.
+        combined = customer.contract_method == COMBINED_APARTMENT_PLANNER_CONTRACT
         search: dict[str, object] = {
             "schYm": "",
-            "custNo": customer.house_contract_number,
+            "custNo": customer.customer_number if combined else customer.house_contract_number,
             "gubun": "",
             "schChart": "12",
             "CUST_NO": "",
@@ -396,8 +398,11 @@ class KepcoOnClient:
             "dong": "",
             "ho": "",
             "months": "",
-            "chgYmd": customer.change_ymd,
+            "chgYmd": "" if combined else customer.change_ymd,
         }
+        if combined:
+            search["housCntrNo"] = customer.house_contract_number
+        code: str | None = None
         try:
             payload = await self._auth.async_protected_request(
                 ENDPOINT_POWER_PLANNER,
@@ -405,13 +410,15 @@ class KepcoOnClient:
                 submission_id="mf_wfm_layout_sbm_powerPlanner",
             )
             code = parse_power_planner_return_code(payload)
-            current, predicted = parse_power_planner(payload)
+            current, predicted = parse_power_planner(payload, current_unit_wh=combined)
         except KepcoOnRateLimitError:
             return dataclasses.replace(bill, power_planner_status="rate_limited")
         except KepcoOnConnectionError:
             return dataclasses.replace(bill, power_planner_status="connection_error")
         except KepcoOnProtocolError, OverflowError:
-            return dataclasses.replace(bill, power_planner_status="invalid_response")
+            return dataclasses.replace(
+                bill, power_planner_status="invalid_response", power_planner_return_code=code
+            )
         # Authentication and cancellation errors deliberately continue to propagate.
         return dataclasses.replace(
             bill,
