@@ -1,0 +1,98 @@
+name: Verify combined prediction v0.3.8
+on:
+  push:
+    branches:
+      - work/kepco-both-v038-20260906
+permissions:
+  contents: write
+concurrency:
+  group: kepco-both-v038
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Read staged patch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          path: patch-source
+          persist-credentials: false
+      - name: Check out inspected baseline
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: 6e421180bc7992b53c96a476d349540450aa10ba
+          fetch-depth: 0
+          path: repo
+      - name: Apply guarded source changes
+        run: |
+          set -euo pipefail
+          cd repo
+          git switch -c fix/kepco-combined-both-v0.3.8
+          python ../patch-source/.maintenance/prepare_v038.py
+          cp ../patch-source/.maintenance/test_combined_prediction_v038.py tests/
+          git diff --check
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.14.4'
+          cache: pip
+          cache-dependency-path: repo/requirements_test.txt
+      - name: Install test dependencies
+        working-directory: repo
+        run: python -m pip install -r requirements_test.txt
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24.20.0'
+          cache: npm
+          cache-dependency-path: repo/package-lock.json
+      - name: Node regression and audit
+        working-directory: repo
+        run: |
+          npm ci
+          npm run test:login-schema
+          npm audit --audit-level=moderate
+      - name: Format and check production and tests
+        working-directory: repo
+        run: |
+          python -m ruff check --select I --fix .
+          python -m ruff format .
+          python -m ruff format --check .
+          python -m ruff check .
+          python -m mypy
+      - name: Full regression with real HA states
+        working-directory: repo
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pytest --junitxml=/tmp/kepco-v038-tests.xml --cov=custom_components.kepco_on --cov-report=term-missing --cov-report=json:/tmp/kepco-v038-coverage.json --cov-fail-under=95 | tee /tmp/kepco-v038-tests.log
+      - name: Publish only tested clean source
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add CHANGELOG.md README.md RELEASE_NOTES.md pyproject.toml custom_components/kepco_on/api.py custom_components/kepco_on/const.py custom_components/kepco_on/manifest.json custom_components/kepco_on/models.py custom_components/kepco_on/parser.py custom_components/kepco_on/sensor.py docs/POWER_PLANNER_DIAGNOSTICS.md docs/PROTOCOL.md tests/test_apartment_planner.py tests/test_api.py tests/test_auth.py tests/test_combined_planner_regression.py tests/test_diagnostics.py tests/test_planner_state_publication.py tests/test_scaffold.py tests/test_combined_prediction_v038.py
+          test "$(git diff --cached --name-only | wc -l)" -eq 20
+          test -z "$(git diff --name-only)"
+          git diff --cached > /tmp/kepco-v038.patch
+          git commit -m 'fix: restore both combined-contract planner readings for v0.3.8'
+          git archive --format=zip --output=/tmp/kepco-v038-source.zip HEAD
+          git archive --format=zip --prefix=custom_components/kepco_on/ --output=/tmp/kepco_on-v0.3.8.zip HEAD:custom_components/kepco_on
+          unzip -t /tmp/kepco_on-v0.3.8.zip
+          git push origin HEAD:refs/heads/fix/kepco-combined-both-v0.3.8
+      - name: Preserve verification results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: kepco-v038-verification
+          path: |
+            /tmp/kepco-v038-tests.xml
+            /tmp/kepco-v038-tests.log
+            /tmp/kepco-v038-coverage.json
+            /tmp/kepco-v038.patch
+            /tmp/kepco-v038-source.zip
+            /tmp/kepco_on-v0.3.8.zip
+          retention-days: 7
