@@ -1,0 +1,189 @@
+from pathlib import Path
+import json
+
+ROOT = Path.cwd()
+BASE = 'custom_components/kepco_on/'
+OPT = 'apartment_power_planner_wh'
+
+def replace(path, old, new):
+    target = ROOT / path
+    text = target.read_text(encoding='utf-8')
+    if text.count(old) != 1:
+        raise RuntimeError(f'Unexpected source anchor in {path}: {old[:80]!r}')
+    target.write_text(text.replace(old, new), encoding='utf-8')
+
+replace(BASE+'const.py', 'OPT_HISTORY_MONTHS = "history_months"', 'OPT_HISTORY_MONTHS = "history_months"\nOPT_APARTMENT_POWER_PLANNER_WH = "apartment_power_planner_wh"')
+replace(BASE+'const.py', '    "OPT_CO2_FACTOR_KG_PER_KWH",', '    "OPT_APARTMENT_POWER_PLANNER_WH",\n    "OPT_CO2_FACTOR_KG_PER_KWH",')
+for filename in ['__init__.py', 'config_flow.py']:
+    replace(BASE+filename, '    CONFIG_ENTRY_VERSION,\n', '    CONFIG_ENTRY_VERSION,\n    OPT_APARTMENT_POWER_PLANNER_WH,\n')
+replace(BASE+'__init__.py', '        client = KepcoOnClient(auth, clock=dt_util.now)', '''        client = KepcoOnClient(
+            auth,
+            clock=dt_util.now,
+            apartment_power_planner_wh=entry.options.get(OPT_APARTMENT_POWER_PLANNER_WH) is True,
+        )''')
+replace(BASE+'api.py', '        clock: ClockCallback = dt_util.now,\n', '        clock: ClockCallback = dt_util.now,\n        apartment_power_planner_wh: bool = False,\n')
+replace(BASE+'api.py', '        self._clock = clock\n', '        self._clock = clock\n        self._apartment_power_planner_wh = apartment_power_planner_wh\n')
+replace(BASE+'api.py', '''        try:
+            payload = await self._auth.async_protected_request(
+                ENDPOINT_POWER_PLANNER,''', '''        # Explicit account-owner opt-in: this reproduces the reported working
+        # comprehensive-contract request, not a universal endpoint unit rule.
+        reported_wh = self._apartment_power_planner_wh and customer.contract_method in {
+            "아파트(종합계약)", "아파트(종합계약/나)"
+        }
+        if reported_wh:
+            search.update(
+                custNo=customer.customer_number,
+                housCntrNo=customer.house_contract_number,
+                chgYmd="",
+            )
+            bill = dataclasses.replace(bill, power_planner_profile="user_confirmed_apartment_wh")
+        try:
+            payload = await self._auth.async_protected_request(
+                ENDPOINT_POWER_PLANNER,''')
+replace(BASE+'api.py', '            current, predicted = parse_power_planner(payload)', '            current, predicted = parse_power_planner(payload, reported_wh=reported_wh)')
+replace(BASE+'api.py', '            power_planner_status="ok" if current is not None else "no_data",', '''            power_planner_status=(
+                "ok" if current is not None or predicted is not None else "no_data"
+            ),''')
+replace(BASE+'models.py', '    power_planner_return_code: str | None = None\n', '    power_planner_return_code: str | None = None\n    power_planner_profile: str = "default"\n')
+replace(BASE+'parser.py', 'def parse_power_planner(payload: dict[str, object]) -> tuple[float | None, float | None]:', '''def parse_power_planner(
+    payload: dict[str, object], *, reported_wh: bool = False
+) -> tuple[float | None, float | None]:''')
+replace(BASE+'parser.py', '    energy quantity. Do not publish that ambiguous field as kWh.\n', '''    energy quantity. Keep the default conservative. The explicit reported_wh
+    profile uses the account owner's confirmed interpretation for selected
+    apartment contracts, not a universal assertion about the endpoint units.
+''')
+replace(BASE+'parser.py', '''    return (current, None)
+
+
+def _parse_float''', '''    if not reported_wh:
+        return (current, None)
+    predicted = _parse_float(result.get("PREDICT_TOT"), "predicted_usage")
+    if predicted is not None and (not math.isfinite(predicted) or predicted < 0):
+        raise KepcoOnProtocolError("predicted_usage must be finite and nonnegative")
+    # Preserve full internal precision; only the display should round values.
+    return (
+        current / 1000 if current is not None else None,
+        predicted / 1000 if predicted is not None else None,
+    )
+
+
+def _parse_float''')
+replace(BASE+'config_flow.py', '''            {
+                vol.Required(
+                    OPT_POLLING_INTERVAL_HOURS,''', '''            {
+                vol.Optional(
+                    OPT_APARTMENT_POWER_PLANNER_WH,
+                    default=options.get(OPT_APARTMENT_POWER_PLANNER_WH, False),
+                ): bool,
+                vol.Required(
+                    OPT_POLLING_INTERVAL_HOURS,''')
+replace(BASE+'config_flow.py', '''        return (
+            {
+                OPT_POLLING_INTERVAL_HOURS: interval,''', '''        reported_wh = user_input.get(
+            OPT_APARTMENT_POWER_PLANNER_WH,
+            self._config_entry.options.get(OPT_APARTMENT_POWER_PLANNER_WH, False),
+        )
+        if not isinstance(reported_wh, bool):
+            return {}, "invalid_planner_profile"
+        return (
+            {
+                OPT_APARTMENT_POWER_PLANNER_WH: reported_wh,
+                OPT_POLLING_INTERVAL_HOURS: interval,''')
+replace(BASE+'sensor.py', '''            if key == "predicted_period_usage" and (
+                status == "ok" or bill.power_planner_return_code == "00"
+            ):
+                status = "source_unit_unverified"
+''', '''            reported_wh = bill.power_planner_profile == "user_confirmed_apartment_wh"
+            if (
+                key == "predicted_period_usage"
+                and not reported_wh
+                and (status == "ok" or bill.power_planner_return_code == "00")
+            ):
+                status = "source_unit_unverified"
+            elif status == "ok" and self.native_value is None:
+                status = "no_data"
+''')
+replace(BASE+'sensor.py', '                "return_code": bill.power_planner_return_code,\n', '''                "return_code": bill.power_planner_return_code,
+                "provider_return_code": bill.power_planner_return_code,
+                "response_profile": bill.power_planner_profile,
+                "unit_basis": "user_confirmed" if reported_wh else "default",
+                "unit_conversion_divisor": 1000 if reported_wh else None,
+''')
+for field in ('current_period_usage_kwh', 'predicted_period_usage_kwh'):
+    old = f'        value_fn=lambda bill, options: bill.{field},'
+    replace(BASE+'sensor.py', old, old+'\n        suggested_display_precision=2,')
+
+for filename in ('strings.json', 'translations/en.json', 'translations/ko.json'):
+    target = ROOT/BASE/filename
+    content = json.loads(target.read_text(encoding='utf-8'))
+    ko = filename.endswith('ko.json')
+    init = content['options']['step']['init']
+    init['data'][OPT] = '종합계약: 사용자 확인 Wh 응답 사용' if ko else 'Comprehensive apartment: user-confirmed Wh response'
+    init['data_description'][OPT] = ('본인 계정에서 F_AP_QT와 PREDICT_TOT가 Wh 사용량임을 확인한 경우만 켜세요. 종합계약에 한해 고객번호·세대계약번호를 함께 보내고 두 값을 1000으로 나눕니다. 기본값은 꺼짐이며 모든 계정의 공식 단위를 의미하지 않습니다.' if ko else 'Enable only after confirming both fields represent Wh energy for your account. For comprehensive apartments only, send both customer and household IDs and divide both values by 1000. Off by default; not a universal KEPCO unit declaration.')
+    content['options']['error']['invalid_planner_profile'] = '파워플래너 Wh 응답 설정은 켜짐 또는 꺼짐이어야 합니다.' if ko else 'The Power Planner Wh setting must be on or off.'
+    target.write_text(json.dumps(content, ensure_ascii=False, indent=2)+'\n', encoding='utf-8')
+
+replace('tests/test_config_flow.py', '''    assert result["data"] == {
+        OPT_POLLING_INTERVAL_HOURS: 12,''', '''    assert result["data"] == {
+        "apartment_power_planner_wh": False,
+        OPT_POLLING_INTERVAL_HOURS: 12,''')
+replace('tests/test_coordinator.py', '''    def __init__(self, auth: FakeAuth, *, clock: Callable[[], datetime] | None = None) -> None:
+        self.auth = auth
+        self.clock = clock
+''', '''    def __init__(
+        self, auth: FakeAuth, *, clock: Callable[[], datetime] | None = None,
+        apartment_power_planner_wh: bool = False,
+    ) -> None:
+        self.auth = auth
+        self.clock = clock
+        self.apartment_power_planner_wh = apartment_power_planner_wh
+''')
+target = ROOT/'tests/test_coordinator.py'
+target.write_text(target.read_text(encoding='utf-8')+'''
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled", [True, False])
+async def test_setup_passes_explicit_apartment_profile_option(enabled: bool) -> None:
+    import custom_components.kepco_on as init_module
+
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    entry.options["apartment_power_planner_wh"] = enabled
+    FakeAuth.login_results = [account_session()]
+    assert await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+    assert FakeClient.instances[0].apartment_power_planner_wh is enabled
+''', encoding='utf-8')
+
+for filename in [BASE+'const.py', BASE+'manifest.json', 'pyproject.toml', 'tests/test_api.py', 'tests/test_auth.py', 'tests/test_scaffold.py', 'tests/test_diagnostics.py']:
+    target = ROOT/filename
+    text = target.read_text(encoding='utf-8')
+    if '0.3.5' not in text:
+        raise RuntimeError(f'No current version field in {filename}')
+    target.write_text(text.replace('0.3.5', '0.3.6'), encoding='utf-8')
+replace('README.md', '- 버전: `v0.3.5`.', '- 버전: `v0.3.6`.')
+
+notes = '''## 한전ON v0.3.6
+
+### 종합계약 사용자 확인 Wh 응답 옵션
+
+- `종합계약: 사용자 확인 Wh 응답 사용` 옵션을 추가했습니다. 기본값은 꺼짐입니다. 해당 계정에서 두 필드가 Wh 에너지라는 점을 확인한 경우에만 켭니다.
+- 옵션을 켠 종합계약에서만 사용자 보고의 성공 요청처럼 `custNo=CUST_NO`, `housCntrNo=SI_CUST_NO`, `chgYmd=""`를 전달합니다. 단일계약과 주택용의 요청은 변경하지 않습니다.
+- 이 프로필에서 유효한 `F_AP_QT`, `PREDICT_TOT`를 각각 1000으로 나눠 기존 두 kWh 엔티티에 반영합니다. 이는 명시적인 사용자 선택 해석이며 한전의 모든 응답 단위가 검증됐다는 뜻이 아닙니다. 특히 요금 값을 에너지로 해석하면 안 됩니다. 단위를 숫자 크기로 추측하지 않습니다.
+- 실제 0, null, 실패 코드, 비정상 숫자를 구분합니다. 내부 정밀도는 유지하고 표시 정밀도만 두 자리로 제안합니다. 부가 조회 실패가 청구 데이터를 지우지 않습니다.
+- 기존 `return_code`를 유지하면서 같은 값의 `provider_return_code` 별칭을 추가했습니다. `response_profile`, `unit_basis`, `unit_conversion_divisor` 속성으로 적용 설정을 확인할 수 있습니다.
+- 기존 주택용 직접계약 호환성 개선과 주택용 파서 안정성 보강, 계약 허용, 청구 경로, 엔티티 ID, 인증 및 취소 처리를 유지합니다. 명시적 과거월 조회에는 현재 사용량을 섞지 않습니다.
+
+### 적용과 검증 범위
+
+HACS에서 0.3.6 업데이트 후 Home Assistant를 재시작하고 한전ON 통합의 옵션에서 `종합계약: 사용자 확인 Wh 응답 사용`을 켜고 저장합니다. 업데이트만으로 이 옵션이 자동 활성화되지는 않습니다. 끄면 v0.3.5 기본 요청·단위 처리로 돌아갑니다. 통합 삭제나 sed 수정은 필요 없습니다.
+
+실제 계정·운영 HA에는 접근하지 않았습니다. 숫자를 에너지로 해석할 근거는 해당 계정 사용자의 확인이며 모든 종합계약에 대한 공식 단위 검증은 아닙니다. 테스트에는 가상 식별자와 가상 수치만 사용합니다.
+최소 Home Assistant 버전은 2026.8.3입니다.
+'''
+for filename in ('README.md', 'docs/PROTOCOL.md'):
+    target = ROOT/filename
+    target.write_text(target.read_text(encoding='utf-8').rstrip()+'\n\n'+notes, encoding='utf-8')
+target = ROOT/'RELEASE_NOTES.md'
+target.write_text(notes+'\n### 이전 릴리스\n\n'+target.read_text(encoding='utf-8'), encoding='utf-8')
+replace('CHANGELOG.md', '# Changelog\n', '# Changelog\n\n## 0.3.6 — 2026-09-06\n\n- 종합계약에 한해 사용자 확인 Wh 옵션을 추가했습니다. 고객번호·세대계약번호 동시 요청과 조건부 /1000 변환, 기본 꺼짐, 기존 계약/엔티티 유지.\n- 두 센서에 응답 프로필·단위 근거·상태 코드 별칭을 추가했습니다. 단위는 자동 판별하지 않습니다.\n')
+print('Prepared explicit apartment Wh option on v0.3.5 baseline.')

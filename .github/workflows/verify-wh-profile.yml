@@ -1,0 +1,95 @@
+name: Verify apartment Wh profile
+on:
+  push:
+    branches: [work/kepco-wh-profile-20260906]
+permissions:
+  contents: write
+concurrency:
+  group: kepco-wh-profile-20260906
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout patch inputs
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # source: actions/checkout@v7
+        with:
+          path: inputs
+          persist-credentials: false
+      - name: Checkout exact v0.3.5 source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # source: actions/checkout@v7
+        with:
+          ref: f1737d9f5060855baa1f004cae4dacbb207098b5
+          path: repo
+          fetch-depth: 0
+      - name: Apply guarded source edits
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = f1737d9f5060855baa1f004cae4dacbb207098b5
+          git checkout -b fix/kepco-wh-profile-20260906
+          python ../inputs/.github/diagnostics/apply-wh-profile.txt
+          cp ../inputs/.github/diagnostics/test-wh-profile.txt tests/test_planner_wh_profile.py
+          git diff --check
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # source: actions/setup-python@v7
+        with:
+          python-version: '3.14.4'
+          cache: pip
+          cache-dependency-path: repo/requirements_test.txt
+      - name: Install test dependencies
+        working-directory: repo
+        run: python -m pip install -r requirements_test.txt
+      - name: Format and lint
+        working-directory: repo
+        run: |
+          python -m ruff check --fix .
+          python -m ruff format .
+          python -m ruff check .
+          python -m ruff format --check .
+      - name: Type check
+        working-directory: repo
+        run: python -m mypy
+      - name: Run complete tests
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          python -m pytest --cov=custom_components.kepco_on --cov-report=term-missing --cov-fail-under=95 --junitxml=../wh-junit.xml | tee ../wh-tests.txt
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # source: actions/setup-node@v7
+        with:
+          node-version: '24.20.0'
+          cache: npm
+          cache-dependency-path: repo/package-lock.json
+      - name: Node tests and dependency audit
+        working-directory: repo
+        run: |
+          npm ci
+          npm run test:login-schema
+          npm audit --audit-level=moderate
+      - name: Publish clean verified feature branch
+        working-directory: repo
+        run: |
+          set -euo pipefail
+          git diff --check
+          git add -- CHANGELOG.md README.md RELEASE_NOTES.md docs/PROTOCOL.md pyproject.toml custom_components/kepco_on/__init__.py custom_components/kepco_on/api.py custom_components/kepco_on/config_flow.py custom_components/kepco_on/const.py custom_components/kepco_on/manifest.json custom_components/kepco_on/models.py custom_components/kepco_on/parser.py custom_components/kepco_on/sensor.py custom_components/kepco_on/strings.json custom_components/kepco_on/translations/en.json custom_components/kepco_on/translations/ko.json tests/test_api.py tests/test_auth.py tests/test_config_flow.py tests/test_coordinator.py tests/test_diagnostics.py tests/test_planner_wh_profile.py tests/test_scaffold.py
+          test "$(git diff --cached --name-only | wc -l)" -eq 23
+          test -z "$(git diff --name-only)"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git diff --cached > ../wh-final.patch
+          git commit -m 'fix: add explicit comprehensive apartment Wh response profile'
+          git archive --format=zip -o ../wh-source.zip HEAD
+          git push origin HEAD:refs/heads/fix/kepco-wh-profile-20260906
+      - name: Retain verification result
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: wh-profile-verification
+          path: |
+            wh-tests.txt
+            wh-junit.xml
+            wh-final.patch
+            wh-source.zip
+          retention-days: 3
