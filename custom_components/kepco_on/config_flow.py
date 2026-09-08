@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -611,7 +612,7 @@ class KepcoOnOptionsFlow(config_entries.OptionsFlowWithReload):
             )
         except InvalidOperation, ValueError:
             return {}, "invalid_co2_factor"
-        if co2_factor <= 0 or co2_factor > 10:
+        if not math.isfinite(co2_factor) or co2_factor <= 0 or co2_factor > 10:
             return {}, "invalid_co2_factor"
         try:
             history_months = int(user_input.get(OPT_HISTORY_MONTHS, DEFAULT_HISTORY_MONTHS))

@@ -175,7 +175,7 @@ def _co2_estimate(field: str) -> KepcoValueFunction:
         factor = options.get(OPT_CO2_FACTOR_KG_PER_KWH, DEFAULT_CO2_FACTOR_KG_PER_KWH)
         try:
             decimal_factor = Decimal(str(factor))
-            if decimal_factor <= 0:
+            if not decimal_factor.is_finite() or not 0 < decimal_factor <= 10:
                 return None
             estimate = Decimal(usage) * decimal_factor
         except InvalidOperation, ValueError:

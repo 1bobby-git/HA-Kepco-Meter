@@ -850,6 +850,8 @@ async def test_options_flow_rejects_invalid_values() -> None:
         ({**valid, OPT_CO2_FACTOR_KG_PER_KWH: "bad"}, "invalid_co2_factor"),
         ({**valid, OPT_CO2_FACTOR_KG_PER_KWH: 0}, "invalid_co2_factor"),
         ({**valid, OPT_CO2_FACTOR_KG_PER_KWH: 10.1}, "invalid_co2_factor"),
+        ({**valid, OPT_CO2_FACTOR_KG_PER_KWH: "NaN"}, "invalid_co2_factor"),
+        ({**valid, OPT_CO2_FACTOR_KG_PER_KWH: "Infinity"}, "invalid_co2_factor"),
         ({**valid, OPT_HISTORY_MONTHS: "bad"}, "invalid_history_months"),
         ({**valid, OPT_HISTORY_MONTHS: 0}, "invalid_history_months"),
         ({**valid, OPT_HISTORY_MONTHS: 25}, "invalid_history_months"),

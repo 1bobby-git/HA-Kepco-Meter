@@ -573,7 +573,7 @@ async def test_co2_sensors_use_default_custom_and_invalid_factors() -> None:
     assert custom["previous_month_co2_estimate"].native_value == 203
     assert custom["last_year_same_month_co2_estimate"].native_value == 306
 
-    for factor in ("bad", 0, -1):
+    for factor in ("bad", 0, -1, "NaN", "Infinity", "-Infinity", 10.1):
         invalid = by_key(await setup_entities(options={OPT_CO2_FACTOR_KG_PER_KWH: factor}))
         assert invalid["co2_estimate"].native_value is None
         assert invalid["previous_month_co2_estimate"].native_value is None
