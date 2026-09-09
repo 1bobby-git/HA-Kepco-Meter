@@ -850,3 +850,46 @@ def test_entity_translations_have_json_parity_and_requested_korean_names() -> No
             sensor_translation = language["entity"]["sensor"][key]
             assert set(sensor_translation) == {"name"}
             assert sensor_translation["name"]
+
+
+@pytest.mark.asyncio
+async def test_history_sensors_expose_billed_amount_only_when_history_carries_it() -> None:
+    priced_history = (
+        KepcoUsageHistoryPoint("202606", 417, 88450),
+        KepcoUsageHistoryPoint("202607", 457, 101230),
+        KepcoUsageHistoryPoint("202608", 603),
+    )
+    sensors = by_key(
+        await setup_entities(
+            bills_by_customer_key={
+                "cust-a": bill(
+                    usage_kwh=603,
+                    previous_usage_kwh=None,
+                    last_year_usage_kwh=None,
+                    history=priced_history,
+                )
+            }
+        )
+    )
+
+    assert sensors["usage_history_two_months_ago"].extra_state_attributes == {
+        "billing_month": "202606",
+        "amount_krw": 88450,
+    }
+    assert sensors["usage_history_previous_month"].extra_state_attributes == {
+        "billing_month": "202607",
+        "amount_krw": 101230,
+    }
+    # A point without a billed amount and a month absent from the history stay unchanged.
+    assert sensors["usage_history_current_month"].extra_state_attributes == {
+        "billing_month": "202608"
+    }
+    assert sensors["usage_history_last_year_same_month"].extra_state_attributes == {
+        "billing_month": "202508"
+    }
+    # Non-history sensors keep the period attributes and never gain the amount.
+    assert sensors["monthly_usage"].extra_state_attributes == {
+        "billing_month": "202608",
+        "usage_period_start": date(2026, 7, 1),
+        "usage_period_end": date(2026, 7, 31),
+    }

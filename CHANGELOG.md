@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- 주택용 직접계약의 월별 청구액(`mainChart` `afterMny`)을 `월별 사용량` 센서의 `amount_krw` 속성과 `get_usage_history` 응답의 `amount_krw` 필드로 노출했습니다. 청구액이 없는 월은 기존과 같은 형태를 유지합니다.
+
 ## 0.3.9 — 2026-09-08
 
 - CO₂ 환산 계수에 NaN을 입력하면 설정이 저장되던 오류를 수정합니다. 유한한 양수이며 기존 상한 10 이내인 값만 허용합니다.
