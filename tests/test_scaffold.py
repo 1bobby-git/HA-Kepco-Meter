@@ -132,7 +132,7 @@ def test_constants_are_fixed_and_capture_safe() -> None:
     assert const.DEFAULT_CO2_FACTOR_KG_PER_KWH == 0.459
     assert const.PLATFORMS == (Platform.SENSOR,)
     assert frozenset({"JSESSIONID", "kepcoSSO"}) == const.CANDIDATE_COOKIE_NAMES
-    assert frozenset() == const.PERSISTED_COOKIE_ALLOWLIST
+    assert frozenset({"JSESSIONID", "kepcoSSO"}) == const.PERSISTED_COOKIE_ALLOWLIST
 
 
 def test_option_and_config_keys_are_stable_and_legacy_toggles_remain_migration_only() -> None:
