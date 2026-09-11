@@ -150,7 +150,9 @@ async def _ensure_authenticated(
     except KepcoOnProtocolError:
         if not has_saved_password:
             async_create_issue(hass, entry, "session_restore_failed")
-            raise ConfigEntryAuthFailed("KEPCO ON stored session requires reauthentication") from None
+            raise ConfigEntryAuthFailed(
+                "KEPCO ON stored session requires reauthentication"
+            ) from None
         _LOGGER.warning("Discarding invalid stored KEPCO ON session and reauthenticating")
         await auth.async_reset_session()
         await auth.async_reauthenticate()
@@ -162,7 +164,9 @@ async def _ensure_authenticated(
         except KepcoOnProtocolError:
             if not has_saved_password:
                 async_create_issue(hass, entry, "session_restore_failed")
-                raise ConfigEntryAuthFailed("KEPCO ON stored session requires reauthentication") from None
+                raise ConfigEntryAuthFailed(
+                    "KEPCO ON stored session requires reauthentication"
+                ) from None
             _LOGGER.warning("Stored KEPCO ON session validation changed; reauthenticating cleanly")
             await auth.async_reset_session()
             await auth.async_reauthenticate()
