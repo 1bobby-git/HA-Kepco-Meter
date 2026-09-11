@@ -58,9 +58,8 @@ namespace_packages = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = ["homeassistant.*"]
-ignore_missing_imports = true
-
-[[tool.mypy.overrides]]
-module = ["aresponses"]
+module = [
+  "aresponses.*",
+  "pytest_homeassistant_custom_component.*",
+]
 ignore_missing_imports = true
