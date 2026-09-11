@@ -497,7 +497,7 @@ def test_session_payload_filters_cookies_before_store_receives_them() -> None:
 
 
 @pytest.mark.asyncio
-async def test_store_save_filters_disallowed_cookies_by_default(
+async def test_store_save_persists_allowed_cookies_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import custom_components.kepco_on.session_store as session_store
@@ -513,7 +513,18 @@ async def test_store_save_filters_disallowed_cookies_by_default(
     )
 
     assert MemoryStore.saved is not None
-    assert MemoryStore.saved["cookies"] == []
+    cookies = cast("list[dict[str, Any]]", MemoryStore.saved["cookies"])
+    assert cookies == [
+        {
+            "name": "JSESSIONID",
+            "value": COOKIE_SECRET,
+            "domain": "online.kepco.co.kr",
+            "path": "/",
+            "secure": True,
+            "expires": None,
+            "host_only": True,
+        }
+    ]
 
 
 @pytest.mark.asyncio
