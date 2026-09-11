@@ -19,7 +19,7 @@ from .const import (
     PERSISTED_COOKIE_ALLOWLIST,
 )
 from .exceptions import KepcoOnAuthError, KepcoOnProtocolError, KepcoOnSessionExpired
-from .models import KepcoAccountSession
+from .models import KepcoAccountSession, KepcoCookie
 from .session_store import export_cookies, restore_cookies
 
 JsonObject = dict[str, object]
@@ -39,6 +39,13 @@ LOGIN_RESPONSE_FIELDS = (
     "pwdUpdFlag",
     "frstLoginTF",
     "pwdUp",
+    "userMngSeqno",
+)
+SESSION_VALIDATION_FIELDS = (
+    "refreshToken",
+    "token",
+    "userId",
+    "mbrsNm",
     "userMngSeqno",
 )
 
@@ -334,7 +341,7 @@ class KepcoOnAuth:
         if bump_generation:
             self._generation += 1
 
-    def _export_cookie_snapshot(self) -> tuple:
+    def _export_cookie_snapshot(self) -> tuple[KepcoCookie, ...]:
         """Return the current allowlisted KEPCO cookie snapshot."""
         return export_cookies(
             self._cookie_jar,
@@ -345,11 +352,17 @@ class KepcoOnAuth:
     def _session_from_validation(
         self, payload: JsonObject, previous: KepcoAccountSession
     ) -> KepcoAccountSession:
+        if not any(field in payload for field in SESSION_VALIDATION_FIELDS):
+            return replace(
+                previous,
+                cookies=self._export_cookie_snapshot(),
+                updated_at=self._clock(),
+            )
         return KepcoAccountSession(
-            refresh_token=self._optional_str(payload, "refreshToken") or previous.refresh_token,
+            refresh_token=_require_str(payload, "refreshToken"),
             token=self._optional_str(payload, "token") or previous.token,
-            user_id=self._optional_str(payload, "userId") or previous.user_id,
-            member_name=self._optional_str(payload, "mbrsNm") or previous.member_name,
+            user_id=_require_str(payload, "userId"),
+            member_name=_require_str(payload, "mbrsNm"),
             user_mng_seqno=self._optional_str(payload, "userMngSeqno") or previous.user_mng_seqno,
             cookies=self._export_cookie_snapshot(),
             updated_at=self._clock(),
