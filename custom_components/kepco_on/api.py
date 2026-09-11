@@ -302,7 +302,11 @@ class KepcoOnClient:
         """Return the account type if it is a supported individual account."""
         payload = await self._auth.async_protected_request(ENDPOINT_IS_CORP, None)
         account_type = payload.get("userClNm")
-        if account_type != "INDI":
+        if account_type is None or account_type == "":
+            raise KepcoOnSessionExpired("KEPCO ON account session is incomplete")
+        if not isinstance(account_type, str):
+            raise KepcoOnProtocolError("KEPCO ON account type response is invalid")
+        if account_type.strip().upper() != "INDI":
             raise KepcoOnUnsupportedAccount("Only KEPCO ON individual accounts are supported")
         return "INDI"
 

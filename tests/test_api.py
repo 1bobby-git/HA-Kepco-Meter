@@ -155,7 +155,7 @@ async def test_transport_prepares_login_session_with_fixed_safe_get() -> None:
     assert captured["path"] == "/MYM001D00"
     assert headers["Accept"] == "text/html,application/xhtml+xml"
     assert headers["Referer"] == ORIGIN
-    assert headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.3.10"
+    assert headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.3.11"
     assert "submissionid" not in headers
     assert "refreshToken" not in headers
 
@@ -244,7 +244,7 @@ async def test_transport_posts_json_headers_to_allowlisted_kepco_path() -> None:
     assert headers["Content-Type"] == "application/json; charset=UTF-8"
     assert headers["Referer"] == REFERER
     assert headers["Origin"] == ORIGIN
-    assert headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.3.10"
+    assert headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.3.11"
     assert headers["refreshToken"] == REFRESH_SECRET
     assert headers["submissionid"] == "mf_test"
     assert "sec-ch-ua" not in {key.lower() for key in headers}
@@ -786,6 +786,57 @@ async def test_client_get_account_type_accepts_indi_and_rejects_other_types() ->
 
     assert await client.async_get_account_type() == "INDI"
     with pytest.raises(KepcoOnUnsupportedAccount):
+        await client.async_get_account_type()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("payload", [{}, {"result": False}, {"userClNm": ""}])
+async def test_client_get_account_type_treats_incomplete_response_as_expired(
+    payload: dict[str, object],
+) -> None:
+    class Auth:
+        async def async_protected_request(
+            self,
+            path: str,
+            request_payload: dict[str, object] | None,
+            *,
+            submission_id: str | None = None,
+        ) -> dict[str, object]:
+            assert path == "/isCorp"
+            assert request_payload is None
+            assert submission_id is None
+            return payload
+
+        def account_uid_hash(self) -> str:
+            return "HASH"
+
+    client = KepcoOnClient(cast("Any", Auth()))
+
+    with pytest.raises(KepcoOnSessionExpired):
+        await client.async_get_account_type()
+
+
+@pytest.mark.asyncio
+async def test_client_get_account_type_rejects_invalid_type_shape() -> None:
+    class Auth:
+        async def async_protected_request(
+            self,
+            path: str,
+            payload: dict[str, object] | None,
+            *,
+            submission_id: str | None = None,
+        ) -> dict[str, object]:
+            assert path == "/isCorp"
+            assert payload is None
+            assert submission_id is None
+            return {"userClNm": True}
+
+        def account_uid_hash(self) -> str:
+            return "HASH"
+
+    client = KepcoOnClient(cast("Any", Auth()))
+
+    with pytest.raises(KepcoOnProtocolError):
         await client.async_get_account_type()
 
 

@@ -594,6 +594,90 @@ async def test_setup_invalid_restore_uses_saved_password_reauth() -> None:
 
 
 @pytest.mark.asyncio
+async def test_setup_reauthenticates_legacy_session_without_cookies(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on as init_module
+
+    class LegacySessionAuth(FakeAuth):
+        @property
+        def current_session(self) -> KepcoAccountSession:
+            return account_session()
+
+    monkeypatch.setattr(init_module, "KepcoOnAuth", LegacySessionAuth)
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    FakeAuth.restore_results = [True]
+    FakeAuth.login_results = [account_session()]
+
+    assert await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+
+    assert FakeStore.instances[0].cleared is True
+    assert FakeAuth.instances[0].login_calls == [("input-user", PASSWORD_SECRET)]
+
+
+@pytest.mark.asyncio
+async def test_setup_legacy_session_without_password_requests_reauthentication(
+    monkeypatch: pytest.MonkeyPatch,
+    reset_fakes: list[FakeSession],
+) -> None:
+    import custom_components.kepco_on as init_module
+
+    class LegacySessionAuth(FakeAuth):
+        @property
+        def current_session(self) -> KepcoAccountSession:
+            return account_session()
+
+    monkeypatch.setattr(init_module, "KepcoOnAuth", LegacySessionAuth)
+    hass = FakeHass()
+    entry = make_entry()
+    FakeAuth.restore_results = [True]
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert reset_fakes[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_setup_reauthenticates_when_account_response_is_incomplete() -> None:
+    import custom_components.kepco_on as init_module
+
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    FakeAuth.restore_results = [True]
+    FakeAuth.validate_results = [True]
+    FakeAuth.login_results = [account_session()]
+    FakeClient.account_results = [
+        KepcoOnSessionExpired("incomplete restored account session"),
+        "INDI",
+    ]
+
+    assert await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
+
+    assert FakeStore.instances[0].cleared is True
+    assert FakeAuth.instances[0].login_calls == [("input-user", PASSWORD_SECRET)]
+
+
+@pytest.mark.asyncio
+async def test_setup_incomplete_account_without_password_requests_reauthentication(
+    reset_fakes: list[FakeSession],
+) -> None:
+    import custom_components.kepco_on as init_module
+
+    hass = FakeHass()
+    entry = make_entry()
+    FakeAuth.restore_results = [True]
+    FakeAuth.validate_results = [True]
+    FakeClient.account_results = [KepcoOnSessionExpired("incomplete restored account session")]
+
+    with pytest.raises(ConfigEntryAuthFailed):
+        await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert reset_fakes[0].closed is True
+
+
+@pytest.mark.asyncio
 async def test_setup_invalid_restore_without_saved_password_raises_auth_failed(
     reset_fakes: list[FakeSession],
 ) -> None:
