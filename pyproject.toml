@@ -1,6 +1,6 @@
 [project]
 name = "ha-kepco-meter"
-version = "0.3.10"
+version = "0.3.11"
 requires-python = ">=3.14"
 
 [tool.pytest.ini_options]
@@ -58,8 +58,9 @@ namespace_packages = true
 explicit_package_bases = true
 
 [[tool.mypy.overrides]]
-module = [
-  "aresponses.*",
-  "pytest_homeassistant_custom_component.*",
-]
+module = ["homeassistant.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["aresponses"]
 ignore_missing_imports = true
