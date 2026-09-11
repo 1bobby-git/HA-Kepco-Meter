@@ -4,7 +4,7 @@ from homeassistant.const import CONF_PASSWORD, Platform
 
 DOMAIN = "kepco_on"
 NAME = "KEPCO ON"
-VERSION = "0.3.9"
+VERSION = "0.3.10"
 CONFIG_ENTRY_VERSION = 3
 # Scope the user-reported request and Wh conversion to the exact tested contract.
 COMBINED_APARTMENT_PLANNER_CONTRACT = "아파트(종합계약)"
@@ -55,8 +55,10 @@ OPT_ENABLE_CO2_ESTIMATE = "enable_co2_estimate"
 OPT_CO2_FACTOR_KG_PER_KWH = "co2_factor_kg_per_kwh"
 OPT_HISTORY_MONTHS = "history_months"
 
+# Only the two KEPCO ON authentication-session cookies are persisted. The
+# session store still restricts them to KEPCO domains, valid paths and expiry.
 CANDIDATE_COOKIE_NAMES: frozenset[str] = frozenset({"JSESSIONID", "kepcoSSO"})
-PERSISTED_COOKIE_ALLOWLIST: frozenset[str] = frozenset()
+PERSISTED_COOKIE_ALLOWLIST: frozenset[str] = CANDIDATE_COOKIE_NAMES
 
 __all__ = [
     "BASE_URL",
