@@ -19,7 +19,7 @@ from .const import (
     PERSISTED_COOKIE_ALLOWLIST,
 )
 from .exceptions import KepcoOnAuthError, KepcoOnProtocolError, KepcoOnSessionExpired
-from .models import KepcoAccountSession
+from .models import KepcoAccountSession, KepcoCookie
 from .session_store import export_cookies, restore_cookies
 
 JsonObject = dict[str, object]
@@ -39,6 +39,13 @@ LOGIN_RESPONSE_FIELDS = (
     "pwdUpdFlag",
     "frstLoginTF",
     "pwdUp",
+    "userMngSeqno",
+)
+SESSION_VALIDATION_FIELDS = (
+    "refreshToken",
+    "token",
+    "userId",
+    "mbrsNm",
     "userMngSeqno",
 )
 
@@ -146,6 +153,7 @@ class KepcoOnAuth:
         session = await self._store.async_load()
         if session is None:
             return False
+        self._cookie_jar.clear()
         restore_cookies(
             self._cookie_jar,
             session.cookies,
@@ -154,6 +162,14 @@ class KepcoOnAuth:
         )
         self._current_session = session
         return True
+
+    async def async_reset_session(self) -> None:
+        """Discard persisted/runtime authentication state before a clean relogin."""
+        async with self._auth_lock:
+            await self._store.async_clear()
+            self._cookie_jar.clear()
+            self._current_session = None
+            self._generation += 1
 
     async def async_validate_session(self) -> bool:
         """Validate and rotate the current session tokens."""
@@ -205,12 +221,17 @@ class KepcoOnAuth:
         )
         if payload.get("loginChk") != "Y":
             raise KepcoOnSessionExpired("KEPCO ON SSO session expired")
-        refresh_token = payload.get("refreshToken")
-        if not isinstance(refresh_token, str) or not refresh_token:
-            return session.refresh_token
-        if refresh_token != session.refresh_token:
+        refresh_token = self._optional_str(payload, "refreshToken") or session.refresh_token
+        cookies = self._export_cookie_snapshot()
+        if refresh_token != session.refresh_token or cookies != session.cookies:
             await self._save_current_session(
-                replace(session, refresh_token=refresh_token, updated_at=self._clock())
+                replace(
+                    session,
+                    refresh_token=refresh_token,
+                    cookies=cookies,
+                    updated_at=self._clock(),
+                ),
+                bump_generation=refresh_token != session.refresh_token,
             )
         return refresh_token
 
@@ -225,7 +246,7 @@ class KepcoOnAuth:
         session = self._require_current_session()
         generation = self._generation
         try:
-            return await self._transport.request_json(
+            result = await self._transport.request_json(
                 path,
                 payload,
                 refresh_token=session.refresh_token,
@@ -236,12 +257,14 @@ class KepcoOnAuth:
                 if self._generation == generation:
                     await self._async_reauthenticate_unlocked()
             replay_session = self._require_current_session()
-            return await self._transport.request_json(
+            result = await self._transport.request_json(
                 path,
                 payload,
                 refresh_token=replay_session.refresh_token,
                 submission_id=submission_id,
             )
+        await self._async_persist_cookie_snapshot()
+        return result
 
     def account_uid_hash(self) -> str:
         """Return a stable one-way account hash for customer key derivation."""
@@ -261,6 +284,7 @@ class KepcoOnAuth:
             raise KepcoOnAuthError("KEPCO ON username is required to authenticate")
         if not password.strip():
             raise KepcoOnAuthError("KEPCO ON password is required to authenticate")
+        self._cookie_jar.clear()
         await self._transport.async_prepare_login_session()
         login_payload = _login_request_payload(trimmed_username, password)
         payload = await self._transport.request_json(
@@ -284,11 +308,7 @@ class KepcoOnAuth:
                 user_id=_require_str(payload, "userId"),
                 member_name=_require_str(payload, "mbrsNm"),
                 user_mng_seqno=self._optional_str(payload, "userMngSeqno"),
-                cookies=export_cookies(
-                    self._cookie_jar,
-                    PERSISTED_COOKIE_ALLOWLIST,
-                    now=self._clock(),
-                ),
+                cookies=self._export_cookie_snapshot(),
                 updated_at=self._clock(),
             )
         except KepcoOnProtocolError as err:
@@ -298,25 +318,53 @@ class KepcoOnAuth:
         await self._save_current_session(session)
         return session
 
-    async def _save_current_session(self, session: KepcoAccountSession) -> None:
+    async def _async_persist_cookie_snapshot(self) -> None:
+        """Persist rotated KEPCO session cookies without changing auth generation."""
+        async with self._auth_lock:
+            session = self._require_current_session()
+            cookies = self._export_cookie_snapshot()
+            if cookies == session.cookies:
+                return
+            await self._save_current_session(
+                replace(session, cookies=cookies, updated_at=self._clock()),
+                bump_generation=False,
+            )
+
+    async def _save_current_session(
+        self,
+        session: KepcoAccountSession,
+        *,
+        bump_generation: bool = True,
+    ) -> None:
         await self._store.async_save(session)
         self._current_session = session
-        self._generation += 1
+        if bump_generation:
+            self._generation += 1
+
+    def _export_cookie_snapshot(self) -> tuple[KepcoCookie, ...]:
+        """Return the current allowlisted KEPCO cookie snapshot."""
+        return export_cookies(
+            self._cookie_jar,
+            PERSISTED_COOKIE_ALLOWLIST,
+            now=self._clock(),
+        )
 
     def _session_from_validation(
         self, payload: JsonObject, previous: KepcoAccountSession
     ) -> KepcoAccountSession:
+        if not any(field in payload for field in SESSION_VALIDATION_FIELDS):
+            return replace(
+                previous,
+                cookies=self._export_cookie_snapshot(),
+                updated_at=self._clock(),
+            )
         return KepcoAccountSession(
             refresh_token=_require_str(payload, "refreshToken"),
             token=self._optional_str(payload, "token") or previous.token,
             user_id=_require_str(payload, "userId"),
             member_name=_require_str(payload, "mbrsNm"),
             user_mng_seqno=self._optional_str(payload, "userMngSeqno") or previous.user_mng_seqno,
-            cookies=export_cookies(
-                self._cookie_jar,
-                PERSISTED_COOKIE_ALLOWLIST,
-                now=self._clock(),
-            ),
+            cookies=self._export_cookie_snapshot(),
             updated_at=self._clock(),
         )
 

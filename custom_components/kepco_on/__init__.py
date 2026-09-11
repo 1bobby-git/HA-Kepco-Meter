@@ -144,17 +144,39 @@ async def _ensure_authenticated(
     entry: ConfigEntry,
 ) -> None:
     """Restore, validate, or relogin before client use."""
+    has_saved_password = _has_saved_password(entry)
     try:
         restored = await auth.async_restore_session()
-        valid = restored and await auth.async_validate_session()
     except KepcoOnProtocolError:
-        async_create_issue(hass, entry, "session_restore_failed")
-        raise ConfigEntryError("KEPCO ON session restore failed") from None
-    if valid:
+        if not has_saved_password:
+            async_create_issue(hass, entry, "session_restore_failed")
+            raise ConfigEntryAuthFailed(
+                "KEPCO ON stored session requires reauthentication"
+            ) from None
+        _LOGGER.warning("Discarding invalid stored KEPCO ON session and reauthenticating")
+        await auth.async_reset_session()
+        await auth.async_reauthenticate()
         return
-    if not _has_saved_password(entry):
+
+    if restored:
+        try:
+            valid = await auth.async_validate_session()
+        except KepcoOnProtocolError:
+            if not has_saved_password:
+                async_create_issue(hass, entry, "session_restore_failed")
+                raise ConfigEntryAuthFailed(
+                    "KEPCO ON stored session requires reauthentication"
+                ) from None
+            _LOGGER.warning("Stored KEPCO ON session validation changed; reauthenticating cleanly")
+            await auth.async_reset_session()
+            await auth.async_reauthenticate()
+            return
+        if valid:
+            return
+
+    if not has_saved_password:
         raise ConfigEntryAuthFailed("KEPCO ON credentials must be reauthenticated")
-    await auth.async_login(str(entry.data[CONF_USERNAME]), str(entry.data[CONF_PASSWORD]))
+    await auth.async_reauthenticate()
 
 
 def _map_setup_error(err: Exception) -> Exception:

@@ -134,6 +134,14 @@ class FakeAuth:
             raise result
         return result
 
+    async def async_reset_session(self) -> None:
+        await self.store.async_clear()
+
+    async def async_reauthenticate(self) -> None:
+        if self.reauth_username is None or self.reauth_password is None:
+            raise RuntimeError("reauthentication credentials are missing")
+        await self.async_login(self.reauth_username, self.reauth_password)
+
     async def async_login(self, username: str, password: str) -> KepcoAccountSession:
         self.login_calls.append((username, password))
         result = FakeAuth.login_results.pop(0)

@@ -56,7 +56,7 @@ def test_manifest_matches_integration_contract() -> None:
         "iot_class": "cloud_polling",
         "issue_tracker": "https://github.com/1bobby-git/HA-Kepco-Meter/issues",
         "requirements": [],
-        "version": "0.3.9",
+        "version": "0.3.10",
     }
 
 
@@ -119,7 +119,7 @@ def test_gitignore_blocks_capture_and_secret_artifacts() -> None:
 def test_constants_are_fixed_and_capture_safe() -> None:
     assert const.DOMAIN == "kepco_on"
     assert const.NAME == "KEPCO ON"
-    assert const.VERSION == "0.3.9"
+    assert const.VERSION == "0.3.10"
     assert const.CONFIG_ENTRY_VERSION == 3
     assert const.BASE_URL == "https://online.kepco.co.kr"
     assert const.PAGE_URL == "https://online.kepco.co.kr/MYM001D00"
@@ -132,7 +132,7 @@ def test_constants_are_fixed_and_capture_safe() -> None:
     assert const.DEFAULT_CO2_FACTOR_KG_PER_KWH == 0.459
     assert const.PLATFORMS == (Platform.SENSOR,)
     assert frozenset({"JSESSIONID", "kepcoSSO"}) == const.CANDIDATE_COOKIE_NAMES
-    assert frozenset() == const.PERSISTED_COOKIE_ALLOWLIST
+    assert frozenset({"JSESSIONID", "kepcoSSO"}) == const.PERSISTED_COOKIE_ALLOWLIST
 
 
 def test_option_and_config_keys_are_stable_and_legacy_toggles_remain_migration_only() -> None:
