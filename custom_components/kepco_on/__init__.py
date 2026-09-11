@@ -32,6 +32,7 @@ from .exceptions import (
     KepcoOnNoCustomersError,
     KepcoOnProtocolError,
     KepcoOnRateLimitError,
+    KepcoOnSessionExpired,
     KepcoOnUnsupportedAccount,
 )
 from .models import selected_customer_location_title, strict_selected_stored_customers
@@ -159,6 +160,20 @@ async def _ensure_authenticated(
         return
 
     if restored:
+        restored_session = getattr(auth, "current_session", None)
+        if restored_session is not None and not restored_session.cookies:
+            if not has_saved_password:
+                async_create_issue(hass, entry, "session_restore_failed")
+                raise ConfigEntryAuthFailed(
+                    "KEPCO ON legacy session requires reauthentication"
+                ) from None
+            _LOGGER.warning(
+                "Restored legacy KEPCO ON session has no persisted cookies; "
+                "reauthenticating cleanly"
+            )
+            await auth.async_reset_session()
+            await auth.async_reauthenticate()
+            return
         try:
             valid = await auth.async_validate_session()
         except KepcoOnProtocolError:
@@ -177,6 +192,35 @@ async def _ensure_authenticated(
     if not has_saved_password:
         raise ConfigEntryAuthFailed("KEPCO ON credentials must be reauthenticated")
     await auth.async_reauthenticate()
+
+
+async def _ensure_supported_account(
+    hass: HomeAssistant,
+    auth: KepcoOnAuth,
+    client: KepcoOnClient,
+    entry: ConfigEntry,
+) -> None:
+    """Validate account type and recover one incomplete restored session."""
+    try:
+        await client.async_get_account_type()
+        return
+    except KepcoOnSessionExpired:
+        if not _has_saved_password(entry):
+            async_create_issue(hass, entry, "session_restore_failed")
+            raise ConfigEntryAuthFailed("KEPCO ON session requires reauthentication") from None
+
+    _LOGGER.warning(
+        "Restored KEPCO ON session was incomplete during account validation; "
+        "reauthenticating cleanly"
+    )
+    await auth.async_reset_session()
+    await auth.async_reauthenticate()
+    try:
+        await client.async_get_account_type()
+    except KepcoOnSessionExpired:
+        raise KepcoOnProtocolError(
+            "KEPCO ON account response remained incomplete after reauthentication"
+        ) from None
 
 
 def _map_setup_error(err: Exception) -> Exception:
@@ -217,7 +261,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
         await _ensure_authenticated(hass, auth, entry)
         client = KepcoOnClient(auth, clock=dt_util.now)
         setup_phase = "account"
-        await client.async_get_account_type()
+        await _ensure_supported_account(hass, auth, client, entry)
         setup_phase = "customers"
         customers = strict_selected_stored_customers(entry.data)
         coordinator = KepcoOnDataUpdateCoordinator(hass, entry, client, customers)
@@ -237,6 +281,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
         setup_error = err
 
     if setup_error is not None:
+        _LOGGER.error(
+            "KEPCO ON setup failed during %s (%s)",
+            setup_phase,
+            type(setup_error).__name__,
+        )
         if isinstance(setup_error, KepcoOnUnsupportedAccount):
             async_create_issue(hass, entry, "unsupported_account")
         elif isinstance(setup_error, KepcoOnProtocolError):
