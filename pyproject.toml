@@ -1,6 +1,6 @@
 [project]
 name = "ha-kepco-meter"
-version = "0.3.9"
+version = "0.3.10"
 requires-python = ">=3.14"
 
 [tool.pytest.ini_options]
@@ -47,7 +47,6 @@ ignore = [
 
 [tool.ruff.format]
 quote-style = "double"
-indent-style = "space"
 
 [tool.mypy]
 python_version = "3.14"
