@@ -162,15 +162,15 @@ class FakeSession:
         self.cookie_jar = CookieJar()
         self.closed: bool = False
 
-    async def close(self) -> None:
+    def detach(self) -> None:
         self.closed = True
 
 
-class FailingCloseSession(FakeSession):
-    """Session that fails on close without exposing the secret in the exception text."""
+class FailingDetachSession(FakeSession):
+    """Session that fails on detach without exposing secrets in the exception text."""
 
-    async def close(self) -> None:
-        raise RuntimeError("close failed")
+    def detach(self) -> None:
+        raise RuntimeError("detach failed")
 
 
 class MemoryStore:
@@ -543,16 +543,16 @@ async def test_flow_abandonment_close_failure_is_observed_without_secret_logging
 ) -> None:
     import custom_components.kepco_on.config_flow as config_flow
 
-    sessions: list[FailingCloseSession] = []
+    sessions: list[FailingDetachSession] = []
 
     def make_session(
         hass: FakeHass,
         *,
         auto_cleanup: bool,
         cookie_jar: CookieJar,
-    ) -> FailingCloseSession:
+    ) -> FailingDetachSession:
         del hass, auto_cleanup
-        session = FailingCloseSession()
+        session = FailingDetachSession()
         session.cookie_jar = cookie_jar
         sessions.append(session)
         return session
