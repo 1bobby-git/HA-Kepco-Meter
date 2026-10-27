@@ -214,11 +214,11 @@ def test_tests_workflow_runs_required_ci_gates_without_continue_on_error() -> No
     assert_pinned_action(source, steps, "actions/setup-python")
     assert_pinned_action(source, steps, "actions/setup-node")
     assert cast("dict[str, Any]", steps[1]["with"]) == {
-        "python-version": "3.14.4",
+        "python-version": "3.14.10",
         "cache": "pip",
         "cache-dependency-path": "requirements_test.txt",
     }
-    assert cast("dict[str, Any]", steps[3]["with"]) == {"node-version": "24.20.0", "cache": "npm"}
+    assert cast("dict[str, Any]", steps[3]["with"]) == {"node-version": "24.22.1", "cache": "npm"}
     assert run_values(steps) == [
         "python -m pip install -r requirements_test.txt",
         "npm ci",
