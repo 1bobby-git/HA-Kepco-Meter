@@ -25,6 +25,7 @@ from custom_components.kepco_on.models import (
 )
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import EntityCategory, UnitOfEnergy
+from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_registry import RegistryEntryDisabler
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -749,15 +750,20 @@ async def test_cleanup_removes_stale_and_removed_entities_and_reenables_legacy_d
         ({(DOMAIN, "stale", "extra")}, False),
     ],
 )
+@pytest.mark.parametrize("loaded", [True, False], ids=["loaded", "not_loaded"])
 async def test_async_remove_config_entry_device_only_removes_stale_logical_devices(
-    identifiers: set[tuple[str, ...]], expected: bool
+    identifiers: set[tuple[str, ...]], expected: bool, loaded: bool
 ) -> None:
-    from custom_components.kepco_on.sensor import async_remove_config_entry_device
+    # Home Assistant looks this hook up on the integration package, not on platforms.
+    from custom_components.kepco_on import async_remove_config_entry_device
 
     coordinator = FakeCoordinator(
         KepcoCoordinatorData(customers=(customer("cust-a"),), bills_by_customer_key={})
     )
     config_entry = entry(coordinator=coordinator)
+    config_entry.data = {"selected_customers": ["cust-a"]}
+    if not loaded:
+        config_entry.runtime_data = None
 
     result = await async_remove_config_entry_device(
         cast("Any", object()),
@@ -766,6 +772,16 @@ async def test_async_remove_config_entry_device_only_removes_stale_logical_devic
     )
 
     assert result is expected
+
+
+@pytest.mark.asyncio
+async def test_home_assistant_detects_device_removal_support(
+    hass: HomeAssistant, enable_custom_integrations: None
+) -> None:
+    from homeassistant.config_entries import support_remove_from_device
+
+    del enable_custom_integrations
+    assert await support_remove_from_device(hass, DOMAIN) is True
 
 
 def test_entity_translations_have_json_parity_and_requested_korean_names() -> None:

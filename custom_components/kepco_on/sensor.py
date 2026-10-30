@@ -27,6 +27,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from . import KepcoOnConfigEntry
 from .const import (
     COMBINED_APARTMENT_PLANNER_CONTRACT,
+    CONF_SELECTED_CUSTOMERS,
     DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
@@ -735,9 +736,14 @@ async def async_remove_config_entry_device(
 ) -> bool:
     """Return whether Home Assistant may remove a stale KEPCO ON logical device."""
     del hass
-    selected_keys = {
-        customer.stable_key for customer in config_entry.runtime_data.coordinator.data.customers
-    }
+    runtime_data = getattr(config_entry, "runtime_data", None)
+    if runtime_data is not None:
+        selected_keys = {
+            customer.stable_key for customer in runtime_data.coordinator.data.customers
+        }
+    else:
+        # An entry that failed to load still knows its stored selection.
+        selected_keys = {str(key) for key in config_entry.data.get(CONF_SELECTED_CUSTOMERS, [])}
     customer_key = _customer_key_from_device_identifiers(device_entry.identifiers)
     return customer_key is not None and customer_key not in selected_keys
 
