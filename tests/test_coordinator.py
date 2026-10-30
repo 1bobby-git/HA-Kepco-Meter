@@ -62,7 +62,7 @@ class FakeSession:
         self.cookie_jar = CookieJar()
         self.closed = False
 
-    async def close(self) -> None:
+    def detach(self) -> None:
         self.closed = True
 
 
