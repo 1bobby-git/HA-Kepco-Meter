@@ -219,14 +219,20 @@ def parse_house_bill(payload: dict[str, object]) -> KepcoBill:
 
     latest_month, latest_point, latest_period = points[-1]
     period_start, period_end = _parse_house_period(latest_period)
+    history = tuple(point for _, point, _ in points)
+    # mainChart has no separate previous/last-year fields; the same response's
+    # 13-month history carries them, like DO_BEF_KWH/DO_LAST_YEAR_KWH for apartments.
+    usage_by_month = {point.month: point.usage_kwh for point in history}
     return KepcoBill(
         bill_month=latest_month,
         response_bill_month=latest_month,
         period_start=period_start,
         period_end=period_end,
         usage_kwh=latest_point.usage_kwh,
+        previous_usage_kwh=usage_by_month.get(_shift_month(latest_month, -1)),
+        last_year_usage_kwh=usage_by_month.get(_shift_month(latest_month, -12)),
         amount_krw=latest_point.amount_krw,
-        history=tuple(point for _, point, _ in points),
+        history=history,
     )
 
 
@@ -456,6 +462,13 @@ def _next_month(month: str) -> str:
     if month_number == 12:
         return f"{year + 1}01"
     return f"{year}{month_number + 1:02d}"
+
+
+def _shift_month(month: str, offset: int) -> str:
+    """Return a YYYYMM month shifted by whole calendar months."""
+    month_index = int(month[:4]) * 12 + int(month[4:]) - 1 + offset
+    year, zero_based_month = divmod(month_index, 12)
+    return f"{year:04d}{zero_based_month + 1:02d}"
 
 
 def _stable_customer_key(
