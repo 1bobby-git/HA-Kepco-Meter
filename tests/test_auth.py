@@ -714,6 +714,115 @@ async def test_concurrent_expired_requests_share_one_relogin_generation() -> Non
 
 
 @pytest.mark.asyncio
+async def test_protected_request_without_saved_password_revalidates_session_and_replays() -> None:
+    session_checks: list[dict[str, object]] = []
+
+    async def session_check_route(request: web.Request) -> Response:
+        session_checks.append(await request_json(request))
+        return json_response({"result": True})
+
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/my/indi/info/myPageCustNoList",
+        "post",
+        response=json_response({"expired": True}, status=401),
+    )
+    server.add(HOST, "/sessionCheck", "post", response=session_check_route)
+    server.add(
+        HOST,
+        "/my/indi/info/myPageCustNoList",
+        "post",
+        response=json_response({"dlt_myPageAppendList": []}),
+    )
+    store = MemorySessionStore(make_session())
+    async with auth_context(server, store, reauth_password=None) as auth:
+        await auth.async_restore_session()
+        result = await auth.async_protected_request("/my/indi/info/myPageCustNoList", {})
+
+    assert result == {"dlt_myPageAppendList": []}
+    assert session_checks == [
+        {
+            "refreshToken": REFRESH_SECRET,
+            "userId": "USER_ID_SECRET_CANARY",
+            "mbrsNm": "MEMBER_NAME_SECRET_CANARY",
+        }
+    ]
+    assert [saved.refresh_token for saved in store.saved] == [REFRESH_SECRET]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "session_check",
+    [
+        json_response({"result": False}),
+        json_response({"expired": True}, status=401),
+        json_response({"result": "MFA_REQUIRED", "challenge": "sms"}),
+    ],
+    ids=["result_false", "expired", "unexpected_schema"],
+)
+async def test_protected_request_without_saved_password_requires_reauth_when_check_fails(
+    session_check: Response,
+) -> None:
+    protected_calls = 0
+
+    async def protected_route(request: web.Request) -> Response:
+        nonlocal protected_calls
+        del request
+        protected_calls += 1
+        return json_response({"expired": True}, status=401)
+
+    server = ResponsesMockServer()
+    server.add(HOST, "/my/indi/info/myPageCustNoList", "post", response=protected_route, repeat=2)
+    server.add(HOST, "/sessionCheck", "post", response=session_check)
+    store = MemorySessionStore(make_session())
+    async with auth_context(server, store, reauth_password=None) as auth:
+        await auth.async_restore_session()
+        with pytest.raises(KepcoOnAuthError) as raised:
+            await auth.async_protected_request("/my/indi/info/myPageCustNoList", {})
+
+    assert type(raised.value) is KepcoOnAuthError
+    assert_no_secret(str(raised.value))
+    assert protected_calls == 1
+    assert store.saved == []
+
+
+@pytest.mark.asyncio
+async def test_concurrent_expired_requests_without_password_share_one_session_check() -> None:
+    session_checks = 0
+    protected_calls = 0
+
+    async def protected_route(request: web.Request) -> Response:
+        nonlocal protected_calls
+        del request
+        protected_calls += 1
+        if protected_calls <= 2:
+            return json_response({"expired": True}, status=401)
+        return json_response({"ok": protected_calls})
+
+    async def session_check_route(request: web.Request) -> Response:
+        nonlocal session_checks
+        del request
+        session_checks += 1
+        await asyncio.sleep(0)
+        return json_response({"result": True})
+
+    server = ResponsesMockServer()
+    server.add(HOST, "/my/indi/info/myPageCustNoList", "post", response=protected_route, repeat=4)
+    server.add(HOST, "/sessionCheck", "post", response=session_check_route, repeat=2)
+    store = MemorySessionStore(make_session())
+    async with auth_context(server, store, reauth_password=None) as auth:
+        await auth.async_restore_session()
+        results = await asyncio.gather(
+            auth.async_protected_request("/my/indi/info/myPageCustNoList", {}),
+            auth.async_protected_request("/my/indi/info/myPageCustNoList", {}),
+        )
+
+    assert session_checks == 1
+    assert sorted(cast("int", result["ok"]) for result in results) == [3, 4]
+
+
+@pytest.mark.asyncio
 async def test_export_session_snapshot_hides_password_and_is_copy() -> None:
     store = MemorySessionStore(make_session())
     async with auth_context(ResponsesMockServer(), store) as auth:
