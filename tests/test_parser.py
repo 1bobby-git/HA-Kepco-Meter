@@ -7,15 +7,17 @@ import logging
 from datetime import date
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import pytest
 from custom_components.kepco_on import parser
 from custom_components.kepco_on.exceptions import KepcoOnNoCustomersError, KepcoOnProtocolError
 from custom_components.kepco_on.models import KepcoCoordinatorData
 from custom_components.kepco_on.parser import (
+    CustomerRowSkips,
     parse_bill,
     parse_customers,
+    parse_customers_with_skips,
     parse_date,
     parse_int,
     parse_year_month,
@@ -217,6 +219,48 @@ def test_parse_customers_skips_unsupported_and_malformed_rows_in_mixed_account(
     assert "Skipped 4 malformed KEPCO ON customer row(s)" in caplog.text
     assert "TEST_SKIPPED" not in caplog.text
     assert "TEST_CUST_001" not in caplog.text
+
+    with_skips, skips = parse_customers_with_skips(payload, "ACCOUNT_HASH")
+
+    assert with_skips == customers
+    assert skips == CustomerRowSkips(unsupported=1, malformed=4)
+    assert parse_customers_with_skips(
+        load_fixture("customer_list_single.json"), "ACCOUNT_HASH"
+    ) == ((alone,), CustomerRowSkips())
+
+
+@pytest.mark.asyncio
+async def test_client_records_skipped_customer_row_counts_for_the_config_flow() -> None:
+    from custom_components.kepco_on.api import KepcoOnClient
+
+    apartment_row = cast(
+        "list[dict[str, object]]", load_fixture("customer_list_single.json")["dlt_appendList"]
+    )[0]
+    payload: dict[str, object] = {
+        "dlt_myPageAppendList": [
+            apartment_row,
+            {"SI_CUST_NO": "TEST_SKIPPED_MISSING_CUST", "cntrMthdCd": "아파트(단일계약)"},
+            {"CUST_NO": "TEST_X", "SI_CUST_NO": "TEST_Y", "cntrMthdCd": "일반용(갑)저압"},
+        ]
+    }
+
+    class Auth:
+        async def async_protected_request(
+            self, path: str, body: object, *, submission_id: str | None = None
+        ) -> dict[str, object]:
+            del path, body, submission_id
+            return payload
+
+        def account_uid_hash(self) -> str:
+            return "ACCOUNT_HASH"
+
+    client = KepcoOnClient(cast("Any", Auth()))
+    assert client.customer_row_skips == CustomerRowSkips()
+
+    customers = await client.async_get_customers()
+
+    assert [customer.customer_number for customer in customers] == ["TEST_CUST_001"]
+    assert client.customer_row_skips == CustomerRowSkips(unsupported=1, malformed=1)
 
 
 def test_parse_customers_keeps_fallback_names_numbered_by_accepted_customers() -> None:

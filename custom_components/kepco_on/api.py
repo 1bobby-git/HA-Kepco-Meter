@@ -37,8 +37,9 @@ from .exceptions import (
 )
 from .models import KepcoBill, KepcoCustomer
 from .parser import (
+    CustomerRowSkips,
     parse_bill,
-    parse_customers,
+    parse_customers_with_skips,
     parse_house_bill,
     parse_power_planner_return_code,
     parse_power_planner_value,
@@ -297,6 +298,8 @@ class KepcoOnClient:
     ) -> None:
         self._auth = auth
         self._clock = clock
+        # Rows skipped by the last customer-list parse; counts only, never row values.
+        self.customer_row_skips = CustomerRowSkips()
 
     async def async_get_account_type(self) -> str:
         """Return the account type if it is a supported individual account."""
@@ -332,7 +335,11 @@ class KepcoOnClient:
             },
             submission_id="mf_wfm_layout_sbm_myPageCustList",
         )
-        return parse_customers(payload, self._auth.account_uid_hash())
+        self.customer_row_skips = CustomerRowSkips()
+        customers, self.customer_row_skips = parse_customers_with_skips(
+            payload, self._auth.account_uid_hash()
+        )
+        return customers
 
     async def async_get_bill(self, customer: KepcoCustomer, month: str | None = None) -> KepcoBill:
         """Return latest or requested-month bill detail for a customer."""

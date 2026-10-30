@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+from dataclasses import dataclass
 from datetime import date
 from hashlib import sha256
 
@@ -105,12 +106,27 @@ def parse_day_of_month(value: object, field_name: str) -> str | None:
     return normalized
 
 
+@dataclass(frozen=True, slots=True)
+class CustomerRowSkips:
+    """Counts of customer rows skipped by the customer-list parser."""
+
+    unsupported: int = 0
+    malformed: int = 0
+
+
 def parse_customers(payload: dict[str, object], account_uid_hash: str) -> tuple[KepcoCustomer, ...]:
     """Parse supported contracts, skipping unsupported or malformed customer rows.
 
     One account can list apartment, 주택용 and other contract types together. A row
     that cannot be used must not hide the supported contracts next to it.
     """
+    return parse_customers_with_skips(payload, account_uid_hash)[0]
+
+
+def parse_customers_with_skips(
+    payload: dict[str, object], account_uid_hash: str
+) -> tuple[tuple[KepcoCustomer, ...], CustomerRowSkips]:
+    """Parse supported contracts and return how many rows were skipped."""
     rows = _customer_rows(payload)
     if not rows:
         raise KepcoOnNoCustomersError("KEPCO ON account has no customer contracts")
@@ -145,7 +161,7 @@ def parse_customers(payload: dict[str, object], account_uid_hash: str) -> tuple[
             "Only supported apartment and 주택용 contracts are accepted "
             f"({unsupported} unsupported rows)"
         )
-    return tuple(customers)
+    return tuple(customers), CustomerRowSkips(unsupported=unsupported, malformed=malformed)
 
 
 class _UnsupportedContractError(Exception):
