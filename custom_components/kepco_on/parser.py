@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 from datetime import date
@@ -14,6 +15,8 @@ from .models import (
     KepcoCustomer,
     KepcoUsageHistoryPoint,
 )
+
+_LOGGER = logging.getLogger(__name__)
 
 SUPPORTED_APARTMENT_CONTRACT = "아파트(단일계약)"
 SUPPORTED_APARTMENT_CONTRACTS = frozenset(
@@ -103,52 +106,87 @@ def parse_day_of_month(value: object, field_name: str) -> str | None:
 
 
 def parse_customers(payload: dict[str, object], account_uid_hash: str) -> tuple[KepcoCustomer, ...]:
-    """Parse apartment contracts from the captured KEPCO customer-list response shape."""
+    """Parse supported contracts, skipping unsupported or malformed customer rows.
+
+    One account can list apartment, 주택용 and other contract types together. A row
+    that cannot be used must not hide the supported contracts next to it.
+    """
     rows = _customer_rows(payload)
     if not rows:
         raise KepcoOnNoCustomersError("KEPCO ON account has no customer contracts")
 
     customers: list[KepcoCustomer] = []
-    for index, row in enumerate(rows):
-        contract_method = _optional_str(row, "cntrMthdCd") or ""
-        display_index = index + 1
-        if contract_method.startswith(SUPPORTED_HOUSE_CONTRACT_PREFIX):
-            # 주택용 직접계약은 응답에 CUST_NO가 함께 있어도 SI_CUST_NO를 기준으로 식별한다.
-            customer_number = _required_str(row, "SI_CUST_NO")
-            stable_key = _stable_customer_key(account_uid_hash, customer_number, customer_number)
-            customers.append(
-                KepcoCustomer(
-                    stable_key=stable_key,
-                    apartment_name=contract_method or f"한전ON 고객 {display_index}",
-                    dong="-",
-                    ho="-",
-                    contract_method=contract_method,
-                    is_supported=True,
-                    _customer_number=customer_number,
-                    _house_contract_number=customer_number,
-                    _change_ymd=_optional_str(row, "DC_USER_CHG_NM_YMD") or "",
-                )
-            )
-            continue
-        customer_number = _required_str(row, "CUST_NO")
-        house_contract_number = _required_str(row, "SI_CUST_NO")
-        stable_key = _stable_customer_key(account_uid_hash, customer_number, house_contract_number)
-        customers.append(
-            KepcoCustomer(
-                stable_key=stable_key,
-                apartment_name=_optional_str(row, "APT_NAME") or f"한전ON 고객 {display_index}",
-                dong=_optional_str(row, "APT_DONGNO") or "미확인",
-                ho=_optional_str(row, "APT_HONO") or "미확인",
-                contract_method=contract_method,
-                is_supported=contract_method in SUPPORTED_APARTMENT_CONTRACTS,
-                _customer_number=customer_number,
-                _house_contract_number=house_contract_number,
-                _change_ymd=_optional_str(row, "DC_USER_CHG_NM_YMD") or "",
-            )
+    unsupported = 0
+    malformed = 0
+    first_error: str | None = None
+    for row in rows:
+        try:
+            customers.append(_parse_customer_row(row, account_uid_hash, len(customers) + 1))
+        except _UnsupportedContractError:
+            unsupported += 1
+        except KepcoOnProtocolError as err:
+            malformed += 1
+            # Field names only; parser errors never contain response values.
+            first_error = first_error or str(err)
+            _LOGGER.debug("Skipping malformed KEPCO ON customer row: %s", err)
+    if unsupported:
+        _LOGGER.debug(
+            "Skipped %d KEPCO ON customer row(s) with unsupported contract types", unsupported
         )
-        if not customers[index].is_supported:
-            raise KepcoOnProtocolError("Only supported apartment contracts are accepted")
+    if malformed:
+        _LOGGER.warning("Skipped %d malformed KEPCO ON customer row(s)", malformed)
+    if not customers:
+        if first_error is not None:
+            raise KepcoOnProtocolError(
+                f"{first_error}; no supported customer contract could be parsed "
+                f"({unsupported} unsupported, {malformed} malformed rows)"
+            )
+        raise KepcoOnProtocolError(
+            "Only supported apartment and 주택용 contracts are accepted "
+            f"({unsupported} unsupported rows)"
+        )
     return tuple(customers)
+
+
+class _UnsupportedContractError(Exception):
+    """Internal signal for a well-formed row with an unsupported contract type."""
+
+
+def _parse_customer_row(row: object, account_uid_hash: str, display_index: int) -> KepcoCustomer:
+    """Parse one customer row or raise for an unsupported or malformed row."""
+    if not isinstance(row, dict):
+        raise KepcoOnProtocolError("customer list entries must be objects")
+    contract_method = _optional_str(row, "cntrMthdCd") or ""
+    if contract_method.startswith(SUPPORTED_HOUSE_CONTRACT_PREFIX):
+        # 주택용 직접계약은 응답에 CUST_NO가 함께 있어도 SI_CUST_NO를 기준으로 식별한다.
+        customer_number = _required_str(row, "SI_CUST_NO")
+        return KepcoCustomer(
+            stable_key=_stable_customer_key(account_uid_hash, customer_number, customer_number),
+            apartment_name=contract_method,
+            dong="-",
+            ho="-",
+            contract_method=contract_method,
+            is_supported=True,
+            _customer_number=customer_number,
+            _house_contract_number=customer_number,
+            _change_ymd=_optional_str(row, "DC_USER_CHG_NM_YMD") or "",
+        )
+    if contract_method not in SUPPORTED_APARTMENT_CONTRACTS:
+        # Other contract types (일반용, 산업용, ...) may use other row fields; skip them first.
+        raise _UnsupportedContractError
+    customer_number = _required_str(row, "CUST_NO")
+    house_contract_number = _required_str(row, "SI_CUST_NO")
+    return KepcoCustomer(
+        stable_key=_stable_customer_key(account_uid_hash, customer_number, house_contract_number),
+        apartment_name=_optional_str(row, "APT_NAME") or f"한전ON 고객 {display_index}",
+        dong=_optional_str(row, "APT_DONGNO") or "미확인",
+        ho=_optional_str(row, "APT_HONO") or "미확인",
+        contract_method=contract_method,
+        is_supported=True,
+        _customer_number=customer_number,
+        _house_contract_number=house_contract_number,
+        _change_ymd=_optional_str(row, "DC_USER_CHG_NM_YMD") or "",
+    )
 
 
 def parse_house_bill(payload: dict[str, object]) -> KepcoBill:
@@ -334,19 +372,15 @@ def parse_bill(payload: dict[str, object], requested_month: str | None) -> Kepco
     )
 
 
-def _customer_rows(payload: dict[str, object]) -> list[dict[str, object]]:
+def _customer_rows(payload: dict[str, object]) -> list[object]:
     for key in ("dlt_appendList", "dlt_myPageAppendList"):
         rows = payload.get(key)
         if rows is None:
             continue
         if not isinstance(rows, list):
             raise KepcoOnProtocolError(f"{key} must be a list")
-        parsed: list[dict[str, object]] = []
-        for row in rows:
-            if not isinstance(row, dict):
-                raise KepcoOnProtocolError(f"{key} entries must be objects")
-            parsed.append(row)
-        return parsed
+        # Row shapes are validated one by one so a single bad row is skipped alone.
+        return rows
     raise KepcoOnProtocolError("customer list is missing")
 
 
