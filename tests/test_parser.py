@@ -3,18 +3,21 @@
 from __future__ import annotations
 
 import json
+import logging
 from datetime import date
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import pytest
 from custom_components.kepco_on import parser
 from custom_components.kepco_on.exceptions import KepcoOnNoCustomersError, KepcoOnProtocolError
 from custom_components.kepco_on.models import KepcoCoordinatorData
 from custom_components.kepco_on.parser import (
+    CustomerRowSkips,
     parse_bill,
     parse_customers,
+    parse_customers_with_skips,
     parse_date,
     parse_int,
     parse_year_month,
@@ -175,6 +178,120 @@ def test_parse_customers_accepts_multiple_my_page_append_list() -> None:
     ]
     assert len({customer.stable_key for customer in customers}) == len(customers)
     assert customers[0].stable_key != customers[1].stable_key
+
+
+def test_parse_customers_skips_unsupported_and_malformed_rows_in_mixed_account(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.DEBUG, logger="custom_components.kepco_on.parser")
+    alone = parse_customers(load_fixture("customer_list_single.json"), "ACCOUNT_HASH")[0]
+    house_row = cast(
+        "list[dict[str, object]]", load_fixture("house_customer_list.json")["dlt_myPageAppendList"]
+    )[0]
+    apartment_row = cast(
+        "list[dict[str, object]]", load_fixture("customer_list_single.json")["dlt_appendList"]
+    )[0]
+    payload: dict[str, object] = {
+        "dlt_myPageAppendList": [
+            {
+                "CUST_NO": "TEST_SKIPPED_GENERAL_CUST",
+                "SI_CUST_NO": "TEST_SKIPPED_GENERAL_HOUSE",
+                "cntrMthdCd": "일반용(갑)저압",
+            },
+            apartment_row,
+            {"SI_CUST_NO": "TEST_SKIPPED_MISSING_CUST", "cntrMthdCd": "아파트(단일계약)"},
+            {"CUST_NO": "TEST_SKIPPED_BAD_TYPE", "SI_CUST_NO": "TEST_X", "cntrMthdCd": 1},
+            "not-an-object",
+            {"cntrMthdCd": "주택용/3kW"},
+            house_row,
+        ]
+    }
+
+    customers = parse_customers(payload, "ACCOUNT_HASH")
+
+    assert [customer.customer_number for customer in customers] == [
+        "TEST_CUST_001",
+        "TEST_SI_CUST_001",
+    ]
+    assert customers[0] == alone
+    assert customers[1].is_house is True
+    assert "Skipped 1 KEPCO ON customer row(s) with unsupported contract types" in caplog.text
+    assert "Skipped 4 malformed KEPCO ON customer row(s)" in caplog.text
+    assert "TEST_SKIPPED" not in caplog.text
+    assert "TEST_CUST_001" not in caplog.text
+
+    with_skips, skips = parse_customers_with_skips(payload, "ACCOUNT_HASH")
+
+    assert with_skips == customers
+    assert skips == CustomerRowSkips(unsupported=1, malformed=4)
+    assert parse_customers_with_skips(
+        load_fixture("customer_list_single.json"), "ACCOUNT_HASH"
+    ) == ((alone,), CustomerRowSkips())
+
+
+@pytest.mark.asyncio
+async def test_client_records_skipped_customer_row_counts_for_the_config_flow() -> None:
+    from custom_components.kepco_on.api import KepcoOnClient
+
+    apartment_row = cast(
+        "list[dict[str, object]]", load_fixture("customer_list_single.json")["dlt_appendList"]
+    )[0]
+    payload: dict[str, object] = {
+        "dlt_myPageAppendList": [
+            apartment_row,
+            {"SI_CUST_NO": "TEST_SKIPPED_MISSING_CUST", "cntrMthdCd": "아파트(단일계약)"},
+            {"CUST_NO": "TEST_X", "SI_CUST_NO": "TEST_Y", "cntrMthdCd": "일반용(갑)저압"},
+        ]
+    }
+
+    class Auth:
+        async def async_protected_request(
+            self, path: str, body: object, *, submission_id: str | None = None
+        ) -> dict[str, object]:
+            del path, body, submission_id
+            return payload
+
+        def account_uid_hash(self) -> str:
+            return "ACCOUNT_HASH"
+
+    client = KepcoOnClient(cast("Any", Auth()))
+    assert client.customer_row_skips == CustomerRowSkips()
+
+    customers = await client.async_get_customers()
+
+    assert [customer.customer_number for customer in customers] == ["TEST_CUST_001"]
+    assert client.customer_row_skips == CustomerRowSkips(unsupported=1, malformed=1)
+
+
+def test_parse_customers_keeps_fallback_names_numbered_by_accepted_customers() -> None:
+    payload: dict[str, object] = {
+        "dlt_myPageAppendList": [
+            {"CUST_NO": "TEST_CUST_X", "SI_CUST_NO": "TEST_HOUSE_X", "cntrMthdCd": "산업용"},
+            {
+                "CUST_NO": "TEST_CUST_001",
+                "SI_CUST_NO": "TEST_HOUSE_001",
+                "cntrMthdCd": "아파트(종합계약)",
+            },
+        ]
+    }
+
+    customers = parse_customers(payload, "ACCOUNT_HASH")
+
+    assert [customer.apartment_name for customer in customers] == ["한전ON 고객 1"]
+
+
+def test_parse_customers_rejects_list_without_any_supported_row() -> None:
+    payload: dict[str, object] = {
+        "dlt_myPageAppendList": [
+            {"CUST_NO": "TEST_CUST_X", "SI_CUST_NO": "TEST_HOUSE_X", "cntrMthdCd": "산업용"},
+            {"SI_CUST_NO": "TEST_HOUSE_Y", "cntrMthdCd": "아파트(단일계약)"},
+        ]
+    }
+
+    with pytest.raises(KepcoOnProtocolError) as raised:
+        parse_customers(payload, "ACCOUNT_HASH")
+
+    assert "TEST_" not in str(raised.value)
 
 
 def test_parse_customers_accepts_customer_number_list_without_display_fields() -> None:

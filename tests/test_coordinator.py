@@ -10,7 +10,7 @@ from typing import Any, ClassVar, cast
 from unittest.mock import Mock
 
 import pytest
-from aiohttp import CookieJar
+from aiohttp import ClientSession, CookieJar, TCPConnector
 from custom_components.kepco_on.const import (
     CONF_ACCOUNT_UID_HASH,
     CONF_CUSTOMERS,
@@ -62,7 +62,7 @@ class FakeSession:
         self.cookie_jar = CookieJar()
         self.closed = False
 
-    async def close(self) -> None:
+    def detach(self) -> None:
         self.closed = True
 
 
@@ -984,6 +984,52 @@ async def test_platform_forward_failure_clears_runtime_and_closes_session(
 
     assert reset_fakes[0].closed is True
     assert entry.runtime_data is None
+
+
+@pytest.mark.asyncio
+async def test_real_ha_sessions_are_detached_on_setup_failure_and_unload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Use HA's real session factory, whose close() is only a warning stub."""
+    import custom_components.kepco_on as init_module
+    from homeassistant.helpers import aiohttp_client, frame
+
+    connector = TCPConnector()
+    reports: list[str] = []
+    sessions: list[ClientSession] = []
+    monkeypatch.setattr(aiohttp_client, "_async_get_connector", lambda *args: connector)
+    monkeypatch.setattr(frame, "report_usage", lambda what, **kwargs: reports.append(what))
+
+    def make_real_session(hass: FakeHass, *, auto_cleanup: bool, cookie_jar: CookieJar) -> Any:
+        assert auto_cleanup is False
+        session = aiohttp_client.async_create_clientsession(
+            cast("Any", hass), auto_cleanup=auto_cleanup, cookie_jar=cookie_jar
+        )
+        sessions.append(session)
+        return session
+
+    monkeypatch.setattr(init_module, "async_create_clientsession", make_real_session)
+    hass = FakeHass()
+    try:
+        failing_entry = make_entry(save_password=True)
+        FakeAuth.login_results = [account_session(), account_session()]
+        FakeCoordinator.refresh_results = [UpdateFailed("temporary"), None]
+        with pytest.raises(ConfigEntryNotReady):
+            await init_module.async_setup_entry(cast("Any", hass), cast("Any", failing_entry))
+
+        loaded_entry = make_entry(save_password=True)
+        assert await init_module.async_setup_entry(cast("Any", hass), cast("Any", loaded_entry))
+        assert sessions[1].closed is False
+        assert await init_module.async_unload_entry(cast("Any", hass), cast("Any", loaded_entry))
+
+        assert [session.closed for session in sessions] == [True, True]
+        assert reports == []
+        assert connector.closed is False
+    finally:
+        for session in sessions:
+            if not session.closed:
+                session.detach()
+        await connector.close()
 
 
 def test_coordinator_default_and_option_intervals() -> None:

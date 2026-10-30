@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import math
@@ -17,6 +18,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.const import CONF_PASSWORD
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import selector
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
 
@@ -124,6 +126,37 @@ def _customer_options(customers: tuple[KepcoCustomer, ...]) -> list[selector.Sel
     ]
 
 
+def _with_stored_customer_keys(
+    customers: Sequence[KepcoCustomer],
+    entry_data: Mapping[str, Any],
+) -> tuple[KepcoCustomer, ...]:
+    """Reuse stored stable keys for live customers whose raw contract IDs are unchanged.
+
+    Customer keys hash the account user ID and member name, so a member-name change
+    at KEPCO gives the same contract a new key. Keeping the stored key keeps the
+    configured selection and every existing entity unique ID.
+    """
+    stored = stored_customers(entry_data) or ()
+    stored_keys = {record.stable_key for record in stored}
+    live_keys = {customer.stable_key for customer in customers}
+    drifted: dict[tuple[str, str], str] = {}
+    for record in stored:
+        if record.stable_key not in live_keys:
+            drifted.setdefault(
+                (record.customer_number, record.house_contract_number), record.stable_key
+            )
+    result: list[KepcoCustomer] = []
+    for customer in customers:
+        if customer.stable_key not in stored_keys:
+            stored_key = drifted.pop(
+                (customer.customer_number, customer.house_contract_number), None
+            )
+            if stored_key is not None:
+                customer = dataclasses.replace(customer, stable_key=stored_key)
+        result.append(customer)
+    return tuple(result)
+
+
 def _customer_schema(
     customers: tuple[KepcoCustomer, ...],
     selected: list[str] | None = None,
@@ -205,10 +238,17 @@ def _can_use_live_reconfigure_client(entry: config_entries.ConfigEntry) -> bool:
     return not bool(getattr(session, "closed", True))
 
 
+def _runtime_auth_failed(entry: config_entries.ConfigEntry) -> bool:
+    """Return whether the runtime coordinator stopped after an authentication failure."""
+    coordinator = getattr(getattr(entry, "runtime_data", None), "coordinator", None)
+    return isinstance(getattr(coordinator, "last_exception", None), ConfigEntryAuthFailed)
+
+
 async def _close_session(client_session: Any | None) -> None:
+    """Detach a flow session from Home Assistant's shared connector."""
     if client_session is not None and not getattr(client_session, "closed", False):
         try:
-            await client_session.close()
+            client_session.detach()
         except Exception:
             _LOGGER.warning("Failed to close KEPCO ON config flow session", exc_info=True)
 
@@ -272,6 +312,9 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             account_uid_hash = _account_uid_hash(session.user_id)
             await self.async_set_unique_id(account_uid_hash)
             self._abort_if_unique_id_configured()
+            # Hand off the session as it is now; a /sessionCheck recovery during the
+            # validation requests above may have rotated its tokens and cookies.
+            handoff_session = await auth.async_export_session_snapshot()
             login_succeeded = True
         except AbortFlow as err:
             abort_reason = err.reason
@@ -305,7 +348,7 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             display_name=str(user_input.get(CONF_DISPLAY_NAME) or "").strip(),
             account_uid_hash=account_uid_hash,
             customers=tuple(customers),
-            session=session,
+            session=handoff_session,
             client_session=client_session,
         )
         return self.async_show_form(
@@ -405,6 +448,8 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             customers = await client.async_get_customers()
             if not customers:
                 raise KepcoOnNoCustomersError("No KEPCO ON apartment customers found")
+            row_skips = client.customer_row_skips
+            handoff_session = await auth.async_export_session_snapshot()
             login_succeeded = True
         except EXPECTED_CONFIG_FLOW_ERRORS as err:
             form_error = _map_error(err, stage=validation_stage)
@@ -424,17 +469,37 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors={"base": form_error},
             )
 
-        new_keys = {customer.stable_key for customer in customers}
+        # Reauthentication renews credentials only. It must never switch or drop the
+        # configured customers; a reload would delete the entities of a dropped one.
+        customers = _with_stored_customer_keys(customers, entry.data)
+        live_keys = {customer.stable_key for customer in customers}
         current = [str(value) for value in entry.data.get(CONF_SELECTED_CUSTOMERS, [])]
-        preserved = [key for key in current if key in new_keys]
-        if not preserved and customers:
-            preserved = [customers[0].stable_key]
-        selected_records = selected_customers(customers, preserved)
+        missing = [key for key in current if key not in live_keys]
+        if not current or missing:
+            # A configured contract hidden by a skipped malformed row is a KEPCO response
+            # change, not a removed customer; do not steer the user to delete it.
+            reason = (
+                "protocol_changed_customers"
+                if missing and row_skips.malformed
+                else "reauth_customer_missing"
+            )
+            _LOGGER.warning(
+                "KEPCO ON reauthentication stopped: %d of %d configured customer(s) "
+                "were not found in the account (%d unsupported and %d malformed "
+                "customer row(s) skipped); the entry was not changed",
+                len(missing),
+                len(current),
+                row_skips.unsupported,
+                row_skips.malformed,
+            )
+            await _close_session(client_session)
+            return self.async_abort(reason=reason)
+        selected_records = selected_customers(customers, current)
         data = dict(entry.data)
         data[CONF_ACCOUNT_UID_HASH] = account_uid_hash
         data[CONF_CUSTOMERS] = [serialize_customer(customer) for customer in selected_records]
-        data[CONF_SELECTED_CUSTOMERS] = preserved
-        data[CONF_SESSION_HANDOFF] = session_to_payload(session)
+        data[CONF_SELECTED_CUSTOMERS] = current
+        data[CONF_SESSION_HANDOFF] = session_to_payload(handoff_session)
         if data.get(CONF_SAVE_PASSWORD):
             data[CONF_PASSWORD] = str(user_input[CONF_PASSWORD])
         else:
@@ -497,7 +562,9 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._reconfigure_customers is not None:
             return self._reconfigure_customers, None
 
-        if _can_use_live_reconfigure_client(entry):
+        # After an auth failure the runtime session is known to be rejected; another
+        # request through it would only repeat a login with a stale saved password.
+        if _can_use_live_reconfigure_client(entry) and not _runtime_auth_failed(entry):
             runtime_data = entry.runtime_data
             client = getattr(runtime_data, "client", None)
             if client is None:
@@ -505,11 +572,19 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._reconfigure_customers = fallback_customers
                 return fallback_customers, None
             try:
-                live_customers: tuple[KepcoCustomer, ...] = tuple(
-                    await client.async_get_customers()
+                live_customers: tuple[KepcoCustomer, ...] = _with_stored_customer_keys(
+                    await client.async_get_customers(), entry.data
                 )
+            except KepcoOnAuthError:
+                # Offer the stored selection so a customer that reauthentication could
+                # not find can still be deselected; the reload then asks for reauth.
+                _LOGGER.debug(
+                    "KEPCO ON reconfigure uses stored customers after an authentication error"
+                )
+                fallback_customers = stored_customers(entry.data)
+                self._reconfigure_customers = fallback_customers
+                return fallback_customers, None
             except (
-                KepcoOnAuthError,
                 KepcoOnConnectionError,
                 KepcoOnNoCustomersError,
                 KepcoOnProtocolError,

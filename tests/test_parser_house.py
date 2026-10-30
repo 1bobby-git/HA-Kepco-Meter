@@ -9,6 +9,7 @@ from typing import cast
 
 import pytest
 from custom_components.kepco_on.exceptions import KepcoOnProtocolError
+from custom_components.kepco_on.models import KepcoCustomer
 from custom_components.kepco_on.parser import (
     parse_customers,
     parse_house_bill,
@@ -116,6 +117,62 @@ def test_parse_house_bill_latest_and_history() -> None:
     assert [point.month for point in bill.history] == ["202606", "202607", "202608"]
     assert bill.history[0].usage_kwh == 417
     assert bill.charge.base_krw is None
+
+
+def test_parse_house_bill_derives_previous_and_last_year_usage_from_history() -> None:
+    payload = _load("house_main_chart.json")
+    rows = cast("list[dict[str, object]]", payload["dlt_chart"])
+    rows.append({"jojYmFilter": "202508", "kwh": "512", "afterMny": "120000"})
+
+    bill = parse_house_bill(payload)
+
+    assert bill.bill_month == "202608"
+    assert bill.previous_usage_kwh == 457
+    assert bill.last_year_usage_kwh == 512
+
+
+def test_parse_house_bill_leaves_comparison_months_missing_from_history_unknown() -> None:
+    payload = _load("house_main_chart.json")
+    rows = cast("list[dict[str, object]]", payload["dlt_chart"])
+    rows[1]["kwh"] = ""
+
+    bill = parse_house_bill(payload)
+
+    assert bill.previous_usage_kwh is None
+    assert bill.last_year_usage_kwh is None
+
+
+@pytest.mark.asyncio
+async def test_house_bill_fills_previous_and_last_year_usage_and_emission_sensors() -> None:
+    from .test_sensor import by_key, setup_entities
+
+    payload = _load("house_main_chart.json")
+    cast("list[dict[str, object]]", payload["dlt_chart"]).append(
+        {"jojYmFilter": "202508", "kwh": "512", "afterMny": "120000"}
+    )
+    house = KepcoCustomer(
+        stable_key="house-key",
+        apartment_name="주택용/3kW",
+        dong="-",
+        ho="-",
+        contract_method="주택용/3kW",
+        is_supported=True,
+        _customer_number="TEST_SI_CUST_001",
+        _house_contract_number="TEST_SI_CUST_001",
+    )
+
+    sensors = by_key(
+        await setup_entities(
+            customers=(house,),
+            bills_by_customer_key={house.stable_key: parse_house_bill(payload)},
+        )
+    )
+
+    assert sensors["previous_month_usage"].native_value == 457
+    assert sensors["last_year_same_month_usage"].native_value == 512
+    # Default factor 0.459 kg CO2/kWh: 457 -> 209.763, 512 -> 235.008.
+    assert sensors["previous_month_co2_estimate"].native_value == 210
+    assert sensors["last_year_same_month_co2_estimate"].native_value == 235
 
 
 def test_parse_house_bill_missing_chart_raises() -> None:

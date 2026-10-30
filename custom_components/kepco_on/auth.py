@@ -255,7 +255,7 @@ class KepcoOnAuth:
         except KepcoOnSessionExpired:
             async with self._auth_lock:
                 if self._generation == generation:
-                    await self._async_reauthenticate_unlocked()
+                    await self._async_recover_session_unlocked()
             replay_session = self._require_current_session()
             result = await self._transport.request_json(
                 path,
@@ -277,6 +277,21 @@ class KepcoOnAuth:
         if not self._reauth_username or not self._reauth_password:
             raise KepcoOnAuthError("KEPCO ON password is required to reauthenticate")
         await self._async_login_unlocked(self._reauth_username, self._reauth_password)
+
+    async def _async_recover_session_unlocked(self) -> None:
+        """Recover an expired session once before a protected request is replayed."""
+        if self._reauth_username and self._reauth_password:
+            await self._async_login_unlocked(self._reauth_username, self._reauth_password)
+            return
+        # Without a saved password, the refresh-token /sessionCheck that setup already
+        # uses is the only non-interactive recovery path. Try it once before asking the
+        # user to reauthenticate; network errors still propagate as temporary failures.
+        try:
+            valid = await self.async_validate_session()
+        except KepcoOnProtocolError:
+            valid = False
+        if not valid:
+            raise KepcoOnAuthError("KEPCO ON password is required to reauthenticate")
 
     async def _async_login_unlocked(self, username: str, password: str) -> KepcoAccountSession:
         trimmed_username = username.strip()

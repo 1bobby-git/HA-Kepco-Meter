@@ -11,6 +11,7 @@ from homeassistant.const import CONF_PASSWORD
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryError, ConfigEntryNotReady
 from homeassistant.helpers.aiohttp_client import async_create_clientsession
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.update_coordinator import UpdateFailed
 from homeassistant.util import dt as dt_util
 
@@ -97,9 +98,9 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 
 async def _close_session(session: ClientSession) -> None:
-    """Close a dedicated client session."""
+    """Detach a dedicated session from Home Assistant's shared connector."""
     if not session.closed:
-        await session.close()
+        session.detach()
 
 
 def _clear_runtime_data(entry: ConfigEntry) -> None:
@@ -323,10 +324,26 @@ async def async_unload_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> 
     return unload_ok
 
 
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: KepcoOnConfigEntry,
+    device_entry: DeviceEntry,
+) -> bool:
+    """Allow deleting only logical devices of customers that are no longer selected.
+
+    Home Assistant looks this hook up on the integration package, not on platforms.
+    """
+    # Imported here because the sensor platform imports this package for its entry type.
+    from .sensor import async_remove_config_entry_device as async_remove_stale_device
+
+    return await async_remove_stale_device(hass, config_entry, device_entry)
+
+
 __all__ = [
     "KepcoOnConfigEntry",
     "KepcoOnRuntimeData",
     "async_migrate_entry",
+    "async_remove_config_entry_device",
     "async_setup",
     "async_setup_entry",
     "async_unload_entry",

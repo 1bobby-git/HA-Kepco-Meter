@@ -70,6 +70,7 @@ async def test_house_bill_combines_main_chart_and_power_planner() -> None:
     assert bill.bill_month == "202608"
     assert bill.usage_kwh == 603
     assert bill.amount_krw == 142870
+    assert bill.previous_usage_kwh == 457
     assert bill.current_period_usage_kwh == pytest.approx(509.783)
     assert bill.predicted_period_usage_kwh is None
     assert calls == [

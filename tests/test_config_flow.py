@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import hashlib
 import json
 import logging
@@ -43,13 +44,16 @@ from custom_components.kepco_on.exceptions import (
     KepcoOnUnsupportedAccount,
 )
 from custom_components.kepco_on.models import KepcoAccountSession, KepcoCustomer
+from custom_components.kepco_on.parser import CustomerRowSkips
 from homeassistant.config_entries import (
     ConfigEntryState,
     OptionsFlowManager,
 )
 from homeassistant.const import CONF_PASSWORD
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.redact import REDACTED, async_redact_data
 from homeassistant.helpers.typing import UNDEFINED
+from homeassistant.helpers.update_coordinator import UpdateFailed
 
 ROOT = Path(__file__).resolve().parents[1]
 PASSWORD_SECRET = "PASSWORD_SECRET_CANARY"
@@ -162,15 +166,15 @@ class FakeSession:
         self.cookie_jar = CookieJar()
         self.closed: bool = False
 
-    async def close(self) -> None:
+    def detach(self) -> None:
         self.closed = True
 
 
-class FailingCloseSession(FakeSession):
-    """Session that fails on close without exposing the secret in the exception text."""
+class FailingDetachSession(FakeSession):
+    """Session that fails on detach without exposing secrets in the exception text."""
 
-    async def close(self) -> None:
-        raise RuntimeError("close failed")
+    def detach(self) -> None:
+        raise RuntimeError("detach failed")
 
 
 class MemoryStore:
@@ -234,6 +238,7 @@ class FakeClient:
 
     account_results: ClassVar[list[str | Exception]] = ["INDI"]
     customer_results: ClassVar[list[tuple[KepcoCustomer, ...] | Exception]] = []
+    customer_row_skips: ClassVar[CustomerRowSkips] = CustomerRowSkips()
 
     def __init__(self, auth: FakeAuth) -> None:
         self.auth = auth
@@ -276,6 +281,7 @@ def patched_flow_dependencies(monkeypatch: pytest.MonkeyPatch) -> list[FakeSessi
     FakeAuth.instances = []
     FakeClient.account_results = ["INDI"]
     FakeClient.customer_results = [(customer("key-1"),)]
+    FakeClient.customer_row_skips = CustomerRowSkips()
     monkeypatch.setattr(config_flow, "async_create_clientsession", make_session)
     monkeypatch.setattr(config_flow, "KepcoOnAuth", FakeAuth)
     monkeypatch.setattr(config_flow, "KepcoOnClient", FakeClient)
@@ -303,6 +309,8 @@ def customer(
     apartment: str = "푸른아파트",
     dong: str = "101",
     ho: str = "1001",
+    customer_number: str = RAW_CUSTOMER_SECRET,
+    house_contract_number: str = RAW_HOUSE_SECRET,
 ) -> KepcoCustomer:
     return KepcoCustomer(
         stable_key=stable_key,
@@ -311,8 +319,8 @@ def customer(
         ho=ho,
         contract_method="아파트(단일계약)",
         is_supported=True,
-        _customer_number=RAW_CUSTOMER_SECRET,
-        _house_contract_number=RAW_HOUSE_SECRET,
+        _customer_number=customer_number,
+        _house_contract_number=house_contract_number,
     )
 
 
@@ -543,16 +551,16 @@ async def test_flow_abandonment_close_failure_is_observed_without_secret_logging
 ) -> None:
     import custom_components.kepco_on.config_flow as config_flow
 
-    sessions: list[FailingCloseSession] = []
+    sessions: list[FailingDetachSession] = []
 
     def make_session(
         hass: FakeHass,
         *,
         auto_cleanup: bool,
         cookie_jar: CookieJar,
-    ) -> FailingCloseSession:
+    ) -> FailingDetachSession:
         del hass, auto_cleanup
-        session = FailingCloseSession()
+        session = FailingDetachSession()
         session.cookie_jar = cookie_jar
         sessions.append(session)
         return session
@@ -905,21 +913,27 @@ def test_options_schema_uses_string_default_for_select_when_other_values_change(
 
 
 @pytest.mark.asyncio
-async def test_reauth_success_updates_existing_entry_and_preserves_available_selection(
+async def test_reauth_success_updates_existing_entry_and_keeps_configured_selection(
     patched_flow_dependencies: list[FakeSession],
 ) -> None:
     from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
 
     entry = make_entry()
     entry.data[CONF_SAVE_PASSWORD] = True
-    entry.data[CONF_SELECTED_CUSTOMERS] = ["key-1", "stale"]
     flow = KepcoOnConfigFlow()
     fake_hass = attach_fake_hass(flow)
     flow.handler = DOMAIN
     flow.context = {"source": "reauth", "entry_id": entry.entry_id}
     flow.flow_id = "flow-1"
     cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
-    FakeClient.customer_results = [(customer("key-1"),)]
+    FakeClient.customer_results = [
+        (
+            customer(
+                "key-3", apartment="새아파트", customer_number="CUST3", house_contract_number="H3"
+            ),
+            customer("key-1"),
+        )
+    ]
 
     result = await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
 
@@ -940,13 +954,23 @@ async def test_reauth_entry_step_shows_password_form_and_success_without_saving_
 
     entry = make_entry()
     entry.data[CONF_PASSWORD] = "OLD_PASSWORD"
-    entry.data[CONF_SELECTED_CUSTOMERS] = ["stale"]
+    entry.data[CONF_SELECTED_CUSTOMERS] = ["key-2"]
     flow = KepcoOnConfigFlow()
     fake_hass = attach_fake_hass(flow)
     flow.context = {"source": "reauth", "entry_id": entry.entry_id}
     flow.flow_id = "flow-1"
     cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
-    FakeClient.customer_results = [(customer("key-2"),)]
+    FakeClient.customer_results = [
+        (
+            customer(
+                "key-2",
+                dong="102",
+                ho="1002",
+                customer_number="CUST2",
+                house_contract_number="HOUSE2",
+            ),
+        )
+    ]
 
     shown = await flow.async_step_reauth({})
     result = await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
@@ -954,10 +978,79 @@ async def test_reauth_entry_step_shows_password_form_and_success_without_saving_
     assert shown["type"] == "form"
     assert shown["step_id"] == "reauth_confirm"
     assert result["type"] == "abort"
+    assert result["reason"] == "reauth_successful"
     assert CONF_PASSWORD not in entry.data
     assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
     assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-2"]
-    assert entry.title == "101동 1001호"
+    assert entry.title == "102동 1002호"
+    assert fake_hass.config_entries.reloads == [entry.entry_id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("selected", "live"),
+    [
+        # The old flow silently switched to the first live customer here.
+        (["key-1"], (customer("key-9", customer_number="CUST9", house_contract_number="H9"),)),
+        # The old flow silently dropped key-2 and deleted its entities on reload.
+        (["key-1", "key-2"], (customer("key-1"),)),
+        (["stale"], (customer("key-1"),)),
+        ([], (customer("key-1"),)),
+    ],
+    ids=["switch_to_other_customer", "drop_one_customer", "unknown_key", "empty_selection"],
+)
+async def test_reauth_aborts_without_changes_when_configured_customer_is_missing(
+    patched_flow_dependencies: list[FakeSession],
+    selected: list[str],
+    live: tuple[KepcoCustomer, ...],
+) -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    entry.data[CONF_SAVE_PASSWORD] = True
+    entry.data[CONF_PASSWORD] = "OLD_PASSWORD"
+    entry.data[CONF_SELECTED_CUSTOMERS] = selected
+    before = json.loads(json.dumps(entry.data))
+    flow = KepcoOnConfigFlow()
+    fake_hass = attach_fake_hass(flow)
+    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
+    FakeClient.customer_results = [live]
+
+    result = await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "reauth_customer_missing"
+    assert entry.data == before
+    assert fake_hass.config_entries.updates == []
+    assert fake_hass.config_entries.reloads == []
+    assert patched_flow_dependencies[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_reauth_keeps_stored_customer_key_when_live_key_drifts() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    flow = KepcoOnConfigFlow()
+    fake_hass = attach_fake_hass(flow)
+    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
+    # Same raw contract IDs as stored key-1, but a key derived from a changed member name.
+    FakeClient.customer_results = [(customer("key-1-drifted", apartment="새이름아파트"),)]
+
+    result = await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-1"]
+    stored = entry.data[CONF_CUSTOMERS]
+    assert [item["stable_key"] for item in stored] == ["key-1"]
+    assert stored[0]["apartment_name"] == "새이름아파트"
+    assert stored[0][DATA_CUSTOMER_NUMBER] == RAW_CUSTOMER_SECRET
+    assert "key-1-drifted" not in json.dumps(entry.data)
     assert fake_hass.config_entries.reloads == [entry.entry_id]
 
 
@@ -1150,6 +1243,42 @@ async def test_reconfigure_loaded_entry_uses_live_customers_and_persists_selecte
 
 
 @pytest.mark.asyncio
+async def test_reconfigure_live_customers_keep_stored_key_when_live_key_drifts() -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    live_client = FakeClient(cast("Any", object()))
+    FakeClient.customer_results = [
+        (
+            customer("key-1-drifted"),
+            customer(
+                "key-3", apartment="새아파트", customer_number="CUST3", house_contract_number="H3"
+            ),
+        )
+    ]
+    entry.state = ConfigEntryState.LOADED
+    entry.runtime_data = type("Runtime", (), {"client": live_client, "session": FakeSession()})()
+    flow = KepcoOnConfigFlow()
+    fake_hass = attach_fake_hass(flow)
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    shown = await flow.async_step_reconfigure()
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-1", "key-3"]})
+
+    data_schema = shown["data_schema"]
+    assert data_schema is not None
+    options = str(next(iter(data_schema.schema.values())).config)
+    assert "key-1-drifted" not in options
+    assert result["type"] == "abort"
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-1", "key-3"]
+    assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-1", "key-3"]
+    assert fake_hass.config_entries.reloads == [entry.entry_id]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("raised", "error"),
     [
@@ -1302,6 +1431,220 @@ async def test_reconfigure_closed_runtime_session_falls_back_to_stored_customers
     assert len(FakeClient.customer_results) == 1
 
 
+def _runtime(client: Any, *, last_exception: Exception | None = None) -> Any:
+    coordinator = type("Coordinator", (), {"last_exception": last_exception})()
+    return type(
+        "Runtime",
+        (),
+        {"client": client, "session": FakeSession(), "coordinator": coordinator},
+    )()
+
+
+def _option_values(result: Mapping[str, Any]) -> list[str]:
+    data_schema = result["data_schema"]
+    assert data_schema is not None
+    selector_config = next(iter(data_schema.schema.values())).config
+    return [option["value"] for option in selector_config["options"]]
+
+
+@pytest.mark.asyncio
+async def test_reconfigure_after_reauth_customer_missing_offers_stored_customers_on_auth_error(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Following the reauth_customer_missing text must not dead-end on a loaded entry."""
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    entry.data[CONF_SAVE_PASSWORD] = True
+    entry.data[CONF_PASSWORD] = "OLD_PASSWORD"
+    FakeClient.customer_results = [
+        # Reauth: the configured key-1 contract is no longer listed.
+        (customer("key-9", customer_number="CUST9", house_contract_number="H9"),),
+        # Reconfigure: the loaded runtime client still holds the rejected session.
+        KepcoOnAuthError(PASSWORD_SECRET),
+        KepcoOnAuthError(PASSWORD_SECRET),
+    ]
+    reauth = KepcoOnConfigFlow()
+    attach_fake_hass(reauth)
+    reauth.context = {"source": "reauth", "entry_id": entry.entry_id}
+    reauth.flow_id = "flow-reauth"
+    cast("Any", reauth)._get_reauth_entry = Mock(return_value=entry)
+    aborted = await reauth.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
+    assert aborted["reason"] == "reauth_customer_missing"
+
+    entry.state = ConfigEntryState.LOADED
+    entry.runtime_data = _runtime(FakeClient(cast("Any", object())))
+    flow = KepcoOnConfigFlow()
+    fake_hass = attach_fake_hass(flow)
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-reconfigure"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    shown = await flow.async_step_reconfigure()
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-2"]})
+
+    assert shown["type"] == "form"
+    assert shown["errors"] is None
+    assert _option_values(shown) == ["key-1", "key-2"]
+    # At most one live refresh fails; the submit reuses the stored list without a retry.
+    assert len(FakeClient.customer_results) == 1
+    assert result["type"] == "abort"
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-2"]
+    assert [item["stable_key"] for item in entry.data[CONF_CUSTOMERS]] == ["key-2"]
+    assert fake_hass.config_entries.reloads == [entry.entry_id]
+    assert PASSWORD_SECRET not in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("last_exception", "expected_options", "live_calls"),
+    [
+        (ConfigEntryAuthFailed("expired"), ["key-1", "key-2"], 0),
+        (UpdateFailed("temporary"), ["key-1", "key-3"], 1),
+    ],
+    ids=["auth_failed_uses_stored_customers", "other_failure_refreshes_live"],
+)
+async def test_reconfigure_skips_live_refresh_after_runtime_auth_failure(
+    last_exception: Exception,
+    expected_options: list[str],
+    live_calls: int,
+) -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    entry = make_entry()
+    FakeClient.customer_results = [
+        (
+            customer("key-1"),
+            customer(
+                "key-3", apartment="새아파트", customer_number="CUST3", house_contract_number="H3"
+            ),
+        )
+    ]
+    entry.state = ConfigEntryState.LOADED
+    entry.runtime_data = _runtime(FakeClient(cast("Any", object())), last_exception=last_exception)
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.context = {"source": "reconfigure", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reconfigure_entry = Mock(return_value=entry)
+
+    shown = await flow.async_step_reconfigure()
+    result = await flow.async_step_reconfigure({CONF_SELECTED_CUSTOMERS: ["key-1"]})
+
+    assert shown["type"] == "form"
+    assert shown["errors"] is None
+    assert _option_values(shown) == expected_options
+    assert len(FakeClient.customer_results) == 1 - live_calls
+    assert result["type"] == "abort"
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.data[CONF_SELECTED_CUSTOMERS] == ["key-1"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("skips", "reason"),
+    [
+        (CustomerRowSkips(malformed=1), "protocol_changed_customers"),
+        (CustomerRowSkips(unsupported=1, malformed=2), "protocol_changed_customers"),
+        (CustomerRowSkips(unsupported=1), "reauth_customer_missing"),
+    ],
+    ids=["malformed", "malformed_and_unsupported", "unsupported_only"],
+)
+async def test_reauth_reports_protocol_change_when_malformed_rows_hide_configured_customer(
+    patched_flow_dependencies: list[FakeSession],
+    caplog: pytest.LogCaptureFixture,
+    skips: CustomerRowSkips,
+    reason: str,
+) -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    caplog.set_level(logging.WARNING, logger="custom_components.kepco_on.config_flow")
+    entry = make_entry()
+    before = json.loads(json.dumps(entry.data))
+    flow = KepcoOnConfigFlow()
+    fake_hass = attach_fake_hass(flow)
+    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
+    # The configured key-1 row was skipped by the parser; only another contract parsed.
+    FakeClient.customer_results = [
+        (customer("key-9", customer_number="CUST9", house_contract_number="H9"),)
+    ]
+    FakeClient.customer_row_skips = skips
+
+    result = await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
+
+    assert result["type"] == "abort"
+    assert result["reason"] == reason
+    assert entry.data == before
+    assert fake_hass.config_entries.updates == []
+    assert fake_hass.config_entries.reloads == []
+    assert patched_flow_dependencies[0].closed is True
+    assert (
+        f"({skips.unsupported} unsupported and {skips.malformed} malformed customer row(s) skipped)"
+    ) in caplog.text
+    for secret in (PASSWORD_SECRET, RAW_CUSTOMER_SECRET, RAW_HOUSE_SECRET):
+        assert secret not in caplog.text
+
+
+ROTATED_REFRESH_SECRET = "ROTATED_REFRESH_SECRET_CANARY"
+
+
+def rotate_session_during_account_type(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make account-type validation rotate the session like a /sessionCheck recovery."""
+    original = FakeClient.async_get_account_type
+
+    async def rotating(self: FakeClient) -> str:
+        current = self.auth.current_session
+        assert current is not None
+        self.auth.current_session = dataclasses.replace(
+            current, refresh_token=ROTATED_REFRESH_SECRET
+        )
+        return await original(self)
+
+    monkeypatch.setattr(FakeClient, "async_get_account_type", rotating)
+
+
+@pytest.mark.asyncio
+async def test_user_step_hands_off_session_rotated_during_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rotate_session_during_account_type(monkeypatch)
+    flow = make_flow()
+
+    result = await create_entry(flow)
+
+    assert result["type"] == "create_entry"
+    assert result["data"][CONF_ACCOUNT_UID_HASH] == account_hash("SERVER_USER")
+    handoff = result["data"][CONF_SESSION_HANDOFF]
+    assert handoff["refresh_token"] == ROTATED_REFRESH_SECRET
+    assert TOKEN_SECRET not in json.dumps(handoff)
+
+
+@pytest.mark.asyncio
+async def test_reauth_hands_off_session_rotated_during_validation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.kepco_on.config_flow import KepcoOnConfigFlow
+
+    rotate_session_during_account_type(monkeypatch)
+    entry = make_entry()
+    flow = KepcoOnConfigFlow()
+    attach_fake_hass(flow)
+    flow.context = {"source": "reauth", "entry_id": entry.entry_id}
+    flow.flow_id = "flow-1"
+    cast("Any", flow)._get_reauth_entry = Mock(return_value=entry)
+
+    result = await flow.async_step_reauth_confirm({CONF_PASSWORD: PASSWORD_SECRET})
+
+    assert result["type"] == "abort"
+    assert result["reason"] == "reauth_successful"
+    handoff = entry.data[CONF_SESSION_HANDOFF]
+    assert handoff["refresh_token"] == ROTATED_REFRESH_SECRET
+    assert TOKEN_SECRET not in json.dumps(handoff)
+
+
 @pytest.mark.asyncio
 async def test_options_flow_completion_schedules_one_reload() -> None:
     from custom_components.kepco_on.config_flow import KepcoOnOptionsFlow
@@ -1406,6 +1749,8 @@ def test_translation_files_have_required_key_parity() -> None:
     required_aborts = {
         "already_configured",
         "no_customers",
+        "protocol_changed_customers",
+        "reauth_customer_missing",
         "reauth_successful",
         "reconfigure_successful",
     }
