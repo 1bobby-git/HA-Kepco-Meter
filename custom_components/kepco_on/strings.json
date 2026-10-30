@@ -62,6 +62,7 @@
     "abort": {
       "already_configured": "This KEPCO ON account is already configured.",
       "no_customers": "No stored KEPCO ON customers are available. Reconfigure after refreshing the entry.",
+      "reauth_customer_missing": "A customer configured for this entry was not found in the KEPCO ON account, so reauthentication did not change the entry. Use Reconfigure to update the customer selection, then reauthenticate again. If no configured customer remains, delete and re-add the integration.",
       "reauth_successful": "Reauthentication was successful.",
       "reconfigure_successful": "Customer selection was updated."
     }

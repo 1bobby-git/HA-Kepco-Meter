@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import logging
 import math
@@ -122,6 +123,37 @@ def _customer_options(customers: tuple[KepcoCustomer, ...]) -> list[selector.Sel
         selector.SelectOptionDict(value=customer.stable_key, label=_customer_label(customer))
         for customer in customers
     ]
+
+
+def _with_stored_customer_keys(
+    customers: Sequence[KepcoCustomer],
+    entry_data: Mapping[str, Any],
+) -> tuple[KepcoCustomer, ...]:
+    """Reuse stored stable keys for live customers whose raw contract IDs are unchanged.
+
+    Customer keys hash the account user ID and member name, so a member-name change
+    at KEPCO gives the same contract a new key. Keeping the stored key keeps the
+    configured selection and every existing entity unique ID.
+    """
+    stored = stored_customers(entry_data) or ()
+    stored_keys = {record.stable_key for record in stored}
+    live_keys = {customer.stable_key for customer in customers}
+    drifted: dict[tuple[str, str], str] = {}
+    for record in stored:
+        if record.stable_key not in live_keys:
+            drifted.setdefault(
+                (record.customer_number, record.house_contract_number), record.stable_key
+            )
+    result: list[KepcoCustomer] = []
+    for customer in customers:
+        if customer.stable_key not in stored_keys:
+            stored_key = drifted.pop(
+                (customer.customer_number, customer.house_contract_number), None
+            )
+            if stored_key is not None:
+                customer = dataclasses.replace(customer, stable_key=stored_key)
+        result.append(customer)
+    return tuple(result)
 
 
 def _customer_schema(
@@ -425,16 +457,26 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors={"base": form_error},
             )
 
-        new_keys = {customer.stable_key for customer in customers}
+        # Reauthentication renews credentials only. It must never switch or drop the
+        # configured customers; a reload would delete the entities of a dropped one.
+        customers = _with_stored_customer_keys(customers, entry.data)
+        live_keys = {customer.stable_key for customer in customers}
         current = [str(value) for value in entry.data.get(CONF_SELECTED_CUSTOMERS, [])]
-        preserved = [key for key in current if key in new_keys]
-        if not preserved and customers:
-            preserved = [customers[0].stable_key]
-        selected_records = selected_customers(customers, preserved)
+        missing = [key for key in current if key not in live_keys]
+        if not current or missing:
+            _LOGGER.warning(
+                "KEPCO ON reauthentication stopped: %d of %d configured customer(s) "
+                "were not found in the account; the entry was not changed",
+                len(missing),
+                len(current),
+            )
+            await _close_session(client_session)
+            return self.async_abort(reason="reauth_customer_missing")
+        selected_records = selected_customers(customers, current)
         data = dict(entry.data)
         data[CONF_ACCOUNT_UID_HASH] = account_uid_hash
         data[CONF_CUSTOMERS] = [serialize_customer(customer) for customer in selected_records]
-        data[CONF_SELECTED_CUSTOMERS] = preserved
+        data[CONF_SELECTED_CUSTOMERS] = current
         data[CONF_SESSION_HANDOFF] = session_to_payload(session)
         if data.get(CONF_SAVE_PASSWORD):
             data[CONF_PASSWORD] = str(user_input[CONF_PASSWORD])
@@ -506,8 +548,8 @@ class KepcoOnConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 self._reconfigure_customers = fallback_customers
                 return fallback_customers, None
             try:
-                live_customers: tuple[KepcoCustomer, ...] = tuple(
-                    await client.async_get_customers()
+                live_customers: tuple[KepcoCustomer, ...] = _with_stored_customer_keys(
+                    await client.async_get_customers(), entry.data
                 )
             except (
                 KepcoOnAuthError,
