@@ -29,6 +29,7 @@ Raw endpoint and wire artifacts are intentionally untracked. Do not publish raw 
 | Account type | `/isCorp` returns `userClNm`; only `INDI` is accepted. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnClient.async_get_account_type`. | Behavior of non-INDI accounts beyond safe rejection. |
 | Customer list | `/my/indi/info/myPageCustNoList` uses the 12-key `dma_search` body below. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnClient.async_get_customers` with submission id `mf_wfm_layout_sbm_myPageCustList`. | Empty `myPage` result behavior from a real account. |
 | Bill detail | `/my/charge/pay/aptBillDetail` uses latest empty month or explicit `YYYYMM`. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnClient.async_get_bill` with submission id `mf_wfm_layout_sbm_search`. | Month availability outside tested recent cases. |
+| Residential bill detail | `/my/charge/view/` requires `rsMsg.statusCode == "S"` and a `dma_charge.yy`/`mm` equal to the month selected from `mainChart`. `kwh`, `befKwh`, `lastYearKwh`, `whmMtrAlw`, `bfrMtrAlw`, `gumchmDd`, `fromMmdd`/`toMmdd` and the `dlt_mny` `mnyTitle`/`mnyMny` rows map to existing bill fields; missing charges stay unknown and conflicting aliases are rejected. Connection, rate-limit and shape failures keep the `mainChart` bill and set `house_detail_status`. Code anchor: `custom_components/kepco_on/api.py` `KepcoOnClient._async_get_house_bill`, `custom_components/kepco_on/parser.py` `parse_house_bill_detail`. | Real-account variation of charge titles and short date formats. |
 | Historical mismatch | Requested `202607` can succeed with `DO_ERR_CODE == "HXI001"` while the response repeats another `DO_BILL_YM`; requested month remains effective. | Additional mismatch patterns. |
 | Real-time and CO2 | Real-time Power Planner data and server CO2 values are not implemented. Three CO2 values are local estimates derived from current, previous-month, and previous-year usage. Code anchor: `custom_components/kepco_on/sensor.py` `GREENHOUSE_GAS_SENSOR_DESCRIPTIONS`. | Server-provided CO2 values remain unimplemented. |
 
@@ -55,6 +56,7 @@ Raw endpoint and wire artifacts are intentionally untracked. Do not publish raw 
 | `/isCorp` | POST | None | No JSON body |
 | `/my/indi/info/myPageCustNoList` | POST | `mf_wfm_layout_sbm_myPageCustList` | `dma_search` object with `schYm`, `custNo`, `gubun`, `schChart`, `CUST_NO`, `housCntrNo`, `yyyymm`, `searchType`, `dong`, `ho`, `months`, `chgYmd` |
 | `/my/charge/pay/aptBillDetail` | POST | `mf_wfm_layout_sbm_search` | `dma_search.custNo`, `housCntrNo`, `yymm`, `yyyymm`, `searchType: "DETAIL"` |
+| `/my/charge/view/` | POST | `mf_wfm_layout_sbm_select` | Residential only. `dma_search` object with `schYm` (bill month selected from `mainChart`), `custNo` (`SI_CUST_NO`), `schChart: "12"`, `apKind`, `userEmailAddr`, `userMTel` (empty), `months: "24"`, full `chgYmd` |
 
 `CUST_NO` maps to bill request `custNo`; `SI_CUST_NO` maps to `housCntrNo`. The integration stores selected raw IDs only in config-entry data because they are required for future bill requests; entity/device identifiers use derived stable keys.
 
