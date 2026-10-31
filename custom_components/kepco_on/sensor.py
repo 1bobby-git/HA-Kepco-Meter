@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -26,6 +26,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import KepcoOnConfigEntry
 from .const import (
+    APARTMENT_NEIGHBOR_SENSOR_KEYS,
     COMBINED_APARTMENT_PLANNER_CONTRACT,
     CONF_SELECTED_CUSTOMERS,
     DEFAULT_CO2_FACTOR_KG_PER_KWH,
@@ -517,6 +518,11 @@ def _device_identifier(customer: KepcoCustomer, group: KepcoDeviceGroup) -> str:
     return f"{customer.stable_key}:{group.value}"
 
 
+def _sensor_applies_to_customer(customer: KepcoCustomer, key: str) -> bool:
+    """Return False for apartment comparisons on residential direct contracts."""
+    return key not in APARTMENT_NEIGHBOR_SENSOR_KEYS or not customer.is_house
+
+
 def _device_info(customer: KepcoCustomer, group: KepcoDeviceGroup) -> DeviceInfo:
     """Return one privacy-safe logical device description."""
     group_name = _DEVICE_GROUP_NAMES[group]
@@ -658,7 +664,11 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
     ) -> None:
         super().__init__(coordinator)
         self.customer = customer
-        self.entity_description = description
+        self.entity_description = (
+            description
+            if _sensor_applies_to_customer(customer, description.key)
+            else replace(description, entity_registry_enabled_default=False)
+        )
         self._options = options
         self._attr_unique_id = f"{customer.stable_key}_{description.key}"
         self._attr_device_info = _device_info(customer, description.device_group)
@@ -707,6 +717,8 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
     @property
     def native_value(self) -> KepcoSensorValue:
         """Return the current native sensor value."""
+        if not _sensor_applies_to_customer(self.customer, self.entity_description.key):
+            return None
         bill = self._bill()
         if bill is None or self.customer.stable_key in self.coordinator.data.errors_by_customer_key:
             return None
@@ -715,6 +727,8 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
     @property
     def extra_state_attributes(self) -> KepcoSensorAttributes:
         """Return non-sensitive billing context attributes."""
+        if not _sensor_applies_to_customer(self.customer, self.entity_description.key):
+            return {"data_status": "unsupported_profile"}
         bill = self._bill()
         if bill is None:
             return {}
@@ -778,7 +792,8 @@ async def _async_remove_stale_registry_entries(
     customers: Iterable[KepcoCustomer],
 ) -> None:
     """Remove stale entries and migrate integration-disabled legacy entities."""
-    selected_keys = {customer.stable_key for customer in customers}
+    selected_customers = {customer.stable_key: customer for customer in customers}
+    selected_keys = set(selected_customers)
     entity_registry = er.async_get(hass)
     for registry_entry in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
         if not _is_this_entry_domain_entity(registry_entry, entry.entry_id):
@@ -789,6 +804,13 @@ async def _async_remove_stale_registry_entries(
         customer_key, sensor_key = parsed
         if customer_key not in selected_keys or sensor_key in REMOVED_SENSOR_KEYS:
             entity_registry.async_remove(registry_entry.entity_id)
+            continue
+        if not _sensor_applies_to_customer(selected_customers[customer_key], sensor_key):
+            # Keep user choices; only integration-owned defaults change.
+            if registry_entry.disabled_by is None:
+                entity_registry.async_update_entity(
+                    registry_entry.entity_id, disabled_by=RegistryEntryDisabler.INTEGRATION
+                )
             continue
         if (
             sensor_key in ACTIVE_SENSOR_KEYS

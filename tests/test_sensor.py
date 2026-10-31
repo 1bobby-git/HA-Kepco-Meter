@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +11,7 @@ from typing import Any, cast
 
 import pytest
 from custom_components.kepco_on.const import (
+    APARTMENT_NEIGHBOR_SENSOR_KEYS,
     DEFAULT_CO2_FACTOR_KG_PER_KWH,
     DOMAIN,
     OPT_CO2_FACTOR_KG_PER_KWH,
@@ -1020,3 +1021,73 @@ async def test_usage_device_split_moves_sensors_and_preserves_settings(
         assert usage is not None
         assert usage.area_id == (custom_area if existing_target else meter_area)
         assert usage.name_by_user == ("Custom usage" if existing_target else None)
+
+
+@pytest.mark.parametrize("contract_method", ["주택용/3kW", "아파트(단일계약)", "아파트(종합계약)"])
+async def test_apartment_neighbor_sensors_are_disabled_for_house_contracts(
+    contract_method: str,
+) -> None:
+    item = replace(customer("contract-key"), contract_method=contract_method)
+    sensors = by_key(await setup_entities(customers=(item,)))
+    for key in APARTMENT_NEIGHBOR_SENSOR_KEYS:
+        entity = sensors[key]
+        assert entity.entity_registry_enabled_default is (not item.is_house)
+        if item.is_house:
+            assert entity.native_value is None
+            assert entity.extra_state_attributes == {"data_status": "unsupported_profile"}
+        else:
+            assert entity.native_value is not None
+    assert sensors["neighbor_usage_comparison"].native_value == 573
+
+
+async def test_house_neighbor_registry_migration_preserves_user_disabling(
+    hass: HomeAssistant,
+) -> None:
+    from custom_components.kepco_on import sensor
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    registry_entry = MockConfigEntry(domain=DOMAIN, entry_id="entry-1")
+    registry_entry.add_to_hass(hass)
+    house = replace(customer("house"), contract_method="주택용/3kW")
+    registry = er.async_get(hass)
+    config_entry = SimpleNamespace(entry_id="entry-1", options={})
+    for key in APARTMENT_NEIGHBOR_SENSOR_KEYS:
+        for disabler in (None, RegistryEntryDisabler.USER, RegistryEntryDisabler.INTEGRATION):
+            selected = replace(house, stable_key=f"house-{disabler}")
+            registered = registry.async_get_or_create(
+                "sensor",
+                DOMAIN,
+                f"{selected.stable_key}_{key}",
+                config_entry=registry_entry,
+                disabled_by=disabler,
+            )
+            expected = (
+                RegistryEntryDisabler.USER
+                if disabler == RegistryEntryDisabler.USER
+                else RegistryEntryDisabler.INTEGRATION
+            )
+            for _ in range(2):
+                await sensor._async_remove_stale_registry_entries(
+                    hass, cast("Any", config_entry), (selected,)
+                )
+                current = registry.async_get(registered.entity_id)
+                assert current is not None
+                assert current.disabled_by == expected
+                assert current.unique_id == registered.unique_id
+
+    # An apartment comparison disabled by the integration becomes valid again.
+    registered = registry.async_get_or_create(
+        "sensor",
+        DOMAIN,
+        "changed-contract_building_average_usage",
+        config_entry=registry_entry,
+        disabled_by=RegistryEntryDisabler.INTEGRATION,
+    )
+    await sensor._async_remove_stale_registry_entries(
+        hass,
+        cast("Any", config_entry),
+        (replace(customer("changed-contract"), contract_method="아파트(단일계약)"),),
+    )
+    current = registry.async_get(registered.entity_id)
+    assert current is not None
+    assert current.disabled_by is None
