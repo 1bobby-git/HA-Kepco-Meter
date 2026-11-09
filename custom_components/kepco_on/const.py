@@ -21,6 +21,7 @@ ENDPOINT_MYPAGE_CUST_NO_LIST = "/my/indi/info/myPageCustNoList"
 ENDPOINT_CUST_NO_LIST = "/my/indi/info/custNoList"
 ENDPOINT_APT_BILL_DETAIL = "/my/charge/pay/aptBillDetail"
 ENDPOINT_MAIN_CHART = "/my/memo/mainChart"
+ENDPOINT_HOUSE_BILL_DETAIL = "/my/charge/view/"
 ENDPOINT_POWER_PLANNER = "/my/memo/powerPlanner"
 
 POLLING_INTERVAL_HOURS = (1, 3, 6, 12, 24)
