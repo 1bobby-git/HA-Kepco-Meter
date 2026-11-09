@@ -733,6 +733,118 @@ async def test_cleanup_removes_stale_and_removed_entities_and_reenables_legacy_d
     assert device_registry.removed == ["device-stale-primary", "device-stale-group"]
 
 
+class SingleOwnerDevice:
+    """HA 2026.11+ device whose deprecated owner set must not be read."""
+
+    def __init__(
+        self,
+        device_id: str,
+        identifiers: set[tuple[str, ...]],
+        config_entry_id: str | None,
+    ) -> None:
+        self.id = device_id
+        self.identifiers = identifiers
+        self.config_entry_id = config_entry_id
+        self.is_composite_device = False
+
+    @property
+    def config_entries(self) -> set[str]:
+        raise AssertionError("deprecated DeviceEntry.config_entries was read")
+
+
+def composite_device(
+    device_id: str, identifiers: set[tuple[str, ...]], owners: set[str]
+) -> SimpleNamespace:
+    """Return an HA 2026.11+ composite device that still exposes every owner."""
+    return SimpleNamespace(
+        id=device_id,
+        identifiers=identifiers,
+        config_entry_id=sorted(owners)[0],
+        is_composite_device=True,
+        config_entries=owners,
+    )
+
+
+@pytest.mark.parametrize(
+    ("device", "expected"),
+    [
+        (SingleOwnerDevice("d", set(), "entry-1"), {"entry-1"}),
+        (SingleOwnerDevice("d", set(), None), set()),
+        (SingleOwnerDevice("d", set(), ""), set()),
+        (composite_device("d", set(), {"entry-1", "entry-2"}), {"entry-1", "entry-2"}),
+        (SimpleNamespace(config_entries={"entry-1", "entry-2"}), {"entry-1", "entry-2"}),
+        (SimpleNamespace(config_entries=None), set()),
+        (SimpleNamespace(), set()),
+    ],
+    ids=[
+        "single_owner",
+        "single_owner_none",
+        "single_owner_empty",
+        "composite",
+        "legacy_core",
+        "legacy_core_none",
+        "legacy_core_missing",
+    ],
+)
+def test_device_owner_ids_avoids_deprecated_config_entries(
+    device: object, expected: set[str]
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    assert cast("Any", sensor_module)._device_owner_ids(device) == expected
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_read_deprecated_device_config_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    sensor_any = cast("Any", sensor_module)
+    entity_registry = FakeEntityRegistry([])
+    device_registry = FakeDeviceRegistry(
+        cast(
+            "list[SimpleNamespace]",
+            [
+                SingleOwnerDevice("device-selected", {(DOMAIN, "cust-a")}, "entry-1"),
+                SingleOwnerDevice("device-stale", {(DOMAIN, "stale")}, "entry-1"),
+                SingleOwnerDevice(
+                    "device-stale-group", {(DOMAIN, "stale:monthly_usage")}, "entry-1"
+                ),
+                SingleOwnerDevice("device-other-owner", {(DOMAIN, "stale")}, "entry-2"),
+                SingleOwnerDevice("device-no-owner", {(DOMAIN, "stale")}, None),
+                composite_device(
+                    "device-stale-composite-shared",
+                    {(DOMAIN, "stale:electricity_charge")},
+                    {"entry-1", "entry-2"},
+                ),
+                composite_device(
+                    "device-stale-composite-own",
+                    {(DOMAIN, "stale:greenhouse_gas")},
+                    {"entry-1"},
+                ),
+            ],
+        )
+    )
+    monkeypatch.setattr(sensor_any.er, "async_get", lambda hass: entity_registry)
+    monkeypatch.setattr(
+        sensor_any.er, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+    monkeypatch.setattr(sensor_any.dr, "async_get", lambda hass: device_registry)
+    monkeypatch.setattr(
+        sensor_any.dr, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+
+    entities = await setup_entities(use_real_registry_cleanup=True)
+
+    assert len(entities) == 34
+    assert device_registry.removed == [
+        "device-stale",
+        "device-stale-group",
+        "device-stale-composite-own",
+    ]
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("identifiers", "expected"),
