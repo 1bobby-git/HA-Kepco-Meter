@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, replace
 from datetime import date
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -658,7 +659,13 @@ async def test_multiple_customer_device_names_are_distinct_and_privacy_safe() ->
         if entity.entity_description.key == "meter_reading"
     ]
 
-    assert {device["name"] for device in meter_devices} == {"검침 정보"}
+    # v0.4.3: several customers get a short customer-hash suffix so the devices
+    # can be told apart; identifiers and unique_ids keep the v0.4.2 values.
+    # These test keys are not integration hashes, so the suffix hashes them first.
+    assert {device["name"] for device in meter_devices} == {
+        f"검침 정보 ({sha256(b'cust-a').hexdigest()[:4]})",
+        f"검침 정보 ({sha256(b'cust-b').hexdigest()[:4]})",
+    }
     assert {next(iter(device["identifiers"])) for device in meter_devices} == {
         (DOMAIN, "cust-a"),
         (DOMAIN, "cust-b"),
@@ -667,6 +674,8 @@ async def test_multiple_customer_device_names_are_distinct_and_privacy_safe() ->
     assert RAW_CUSTOMER_SECRET not in rendered
     assert RAW_HOUSE_SECRET not in rendered
     assert RAW_NAME_SECRET not in rendered
+    assert "비밀아파트" not in rendered
+    assert "0304" not in rendered
 
 
 @pytest.mark.asyncio
@@ -743,6 +752,118 @@ async def test_cleanup_removes_stale_and_removed_entities_and_reenables_legacy_d
     ]
     assert entity_registry.updated == [("sensor.reenable_base_charge", None)]
     assert device_registry.removed == ["device-stale-primary", "device-stale-group"]
+
+
+class SingleOwnerDevice:
+    """HA 2026.11+ device whose deprecated owner set must not be read."""
+
+    def __init__(
+        self,
+        device_id: str,
+        identifiers: set[tuple[str, ...]],
+        config_entry_id: str | None,
+    ) -> None:
+        self.id = device_id
+        self.identifiers = identifiers
+        self.config_entry_id = config_entry_id
+        self.is_composite_device = False
+
+    @property
+    def config_entries(self) -> set[str]:
+        raise AssertionError("deprecated DeviceEntry.config_entries was read")
+
+
+def composite_device(
+    device_id: str, identifiers: set[tuple[str, ...]], owners: set[str]
+) -> SimpleNamespace:
+    """Return an HA 2026.11+ composite device that still exposes every owner."""
+    return SimpleNamespace(
+        id=device_id,
+        identifiers=identifiers,
+        config_entry_id=sorted(owners)[0],
+        is_composite_device=True,
+        config_entries=owners,
+    )
+
+
+@pytest.mark.parametrize(
+    ("device", "expected"),
+    [
+        (SingleOwnerDevice("d", set(), "entry-1"), {"entry-1"}),
+        (SingleOwnerDevice("d", set(), None), set()),
+        (SingleOwnerDevice("d", set(), ""), set()),
+        (composite_device("d", set(), {"entry-1", "entry-2"}), {"entry-1", "entry-2"}),
+        (SimpleNamespace(config_entries={"entry-1", "entry-2"}), {"entry-1", "entry-2"}),
+        (SimpleNamespace(config_entries=None), set()),
+        (SimpleNamespace(), set()),
+    ],
+    ids=[
+        "single_owner",
+        "single_owner_none",
+        "single_owner_empty",
+        "composite",
+        "legacy_core",
+        "legacy_core_none",
+        "legacy_core_missing",
+    ],
+)
+def test_device_owner_ids_avoids_deprecated_config_entries(
+    device: object, expected: set[str]
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    assert cast("Any", sensor_module)._device_owner_ids(device) == expected
+
+
+@pytest.mark.asyncio
+async def test_cleanup_does_not_read_deprecated_device_config_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from custom_components.kepco_on import sensor as sensor_module
+
+    sensor_any = cast("Any", sensor_module)
+    entity_registry = FakeEntityRegistry([])
+    device_registry = FakeDeviceRegistry(
+        cast(
+            "list[SimpleNamespace]",
+            [
+                SingleOwnerDevice("device-selected", {(DOMAIN, "cust-a")}, "entry-1"),
+                SingleOwnerDevice("device-stale", {(DOMAIN, "stale")}, "entry-1"),
+                SingleOwnerDevice(
+                    "device-stale-group", {(DOMAIN, "stale:monthly_usage")}, "entry-1"
+                ),
+                SingleOwnerDevice("device-other-owner", {(DOMAIN, "stale")}, "entry-2"),
+                SingleOwnerDevice("device-no-owner", {(DOMAIN, "stale")}, None),
+                composite_device(
+                    "device-stale-composite-shared",
+                    {(DOMAIN, "stale:electricity_charge")},
+                    {"entry-1", "entry-2"},
+                ),
+                composite_device(
+                    "device-stale-composite-own",
+                    {(DOMAIN, "stale:greenhouse_gas")},
+                    {"entry-1"},
+                ),
+            ],
+        )
+    )
+    monkeypatch.setattr(sensor_any.er, "async_get", lambda hass: entity_registry)
+    monkeypatch.setattr(
+        sensor_any.er, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+    monkeypatch.setattr(sensor_any.dr, "async_get", lambda hass: device_registry)
+    monkeypatch.setattr(
+        sensor_any.dr, "async_entries_for_config_entry", lambda reg, entry_id: reg.entries
+    )
+
+    entities = await setup_entities(use_real_registry_cleanup=True)
+
+    assert len(entities) == 34
+    assert device_registry.removed == [
+        "device-stale",
+        "device-stale-group",
+        "device-stale-composite-own",
+    ]
 
 
 @pytest.mark.asyncio
@@ -1021,6 +1142,57 @@ async def test_usage_device_split_moves_sensors_and_preserves_settings(
         assert usage is not None
         assert usage.area_id == (custom_area if existing_target else meter_area)
         assert usage.name_by_user == ("Custom usage" if existing_target else None)
+
+
+async def test_usage_device_split_keeps_multi_customer_name_suffix(hass: HomeAssistant) -> None:
+    from custom_components.kepco_on import sensor
+    from homeassistant.helpers import device_registry as dr
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    registry_entry = MockConfigEntry(domain=DOMAIN, entry_id="entry-1")
+    registry_entry.add_to_hass(hass)
+    devices = dr.async_get(hass)
+    registry = er.async_get(hass)
+    items = (customer("cust-a"), customer("cust-b"))
+    suffixes = sensor._device_name_suffixes(items)
+    for item in items:
+        legacy = devices.async_get_or_create(
+            config_entry_id="entry-1",
+            **sensor._device_info(
+                item, sensor.KepcoDeviceGroup.METER_USAGE, suffixes[item.stable_key]
+            ),
+        )
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{item.stable_key}_monthly_usage",
+            config_entry=registry_entry,
+            device_id=legacy.id,
+        )
+
+    coordinator = FakeCoordinator(
+        KepcoCoordinatorData(
+            customers=items,
+            bills_by_customer_key={item.stable_key: bill() for item in items},
+            errors_by_customer_key={},
+        )
+    )
+    entities: list[Any] = []
+    await sensor.async_setup_entry(
+        hass, cast("Any", entry(coordinator=coordinator)), cast("Any", entities.extend)
+    )
+
+    for item in items:
+        usage = devices.async_get_device_by_identifier(
+            (DOMAIN, f"{item.stable_key}:usage"), "entry-1"
+        )
+        assert usage is not None
+        assert usage.name == f"전기사용량·예측 ({suffixes[item.stable_key]})"
+        moved = registry.async_get_entity_id("sensor", DOMAIN, f"{item.stable_key}_monthly_usage")
+        assert moved is not None
+        moved_entry = registry.async_get(moved)
+        assert moved_entry is not None
+        assert moved_entry.device_id == usage.id
 
 
 @pytest.mark.parametrize("contract_method", ["주택용/3kW", "아파트(단일계약)", "아파트(종합계약)"])
