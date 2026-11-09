@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
@@ -28,6 +28,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from . import KepcoOnConfigEntry
 from .const import (
+    APARTMENT_NEIGHBOR_SENSOR_KEYS,
     COMBINED_APARTMENT_PLANNER_CONTRACT,
     CONF_SELECTED_CUSTOMERS,
     DEFAULT_CO2_FACTOR_KG_PER_KWH,
@@ -63,6 +64,7 @@ class KepcoDeviceGroup(StrEnum):
 
     MONTHLY_USAGE = "monthly_usage"
     METER_USAGE = "meter_usage"
+    USAGE = "usage"
     ELECTRICITY_CHARGE = "electricity_charge"
     NEIGHBOR_COMPARISON = "neighbor_comparison"
     GREENHOUSE_GAS = "greenhouse_gas"
@@ -70,10 +72,15 @@ class KepcoDeviceGroup(StrEnum):
 
 _DEVICE_GROUP_NAMES: dict[KepcoDeviceGroup, str] = {
     KepcoDeviceGroup.MONTHLY_USAGE: "월별 사용량",
-    KepcoDeviceGroup.METER_USAGE: "검침/전기사용량",
+    KepcoDeviceGroup.METER_USAGE: "검침 정보",
+    KepcoDeviceGroup.USAGE: "전기사용량·예측",
     KepcoDeviceGroup.ELECTRICITY_CHARGE: "전기요금",
     KepcoDeviceGroup.NEIGHBOR_COMPARISON: "이웃 전기사용량 비교",
     KepcoDeviceGroup.GREENHOUSE_GAS: "온실가스 배출량",
+}
+# Groups split from an existing device inherit that device's area, labels and disabled state.
+_DEVICE_GROUP_PARENTS = {
+    KepcoDeviceGroup.USAGE: KepcoDeviceGroup.METER_USAGE,
 }
 
 
@@ -302,10 +309,13 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         device_class=SensorDeviceClass.ENERGY,
         value_fn=_usage("previous_meter_reading"),
     ),
+)
+
+USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
     KepcoSensorEntityDescription(
         key="monthly_usage",
         translation_key="monthly_usage",
-        device_group=KepcoDeviceGroup.METER_USAGE,
+        device_group=KepcoDeviceGroup.USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=_usage("usage_kwh"),
@@ -313,7 +323,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
     KepcoSensorEntityDescription(
         key="household_usage",
         translation_key="household_usage",
-        device_group=KepcoDeviceGroup.METER_USAGE,
+        device_group=KepcoDeviceGroup.USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=_household_usage,
@@ -321,7 +331,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
     KepcoSensorEntityDescription(
         key="common_usage",
         translation_key="common_usage",
-        device_group=KepcoDeviceGroup.METER_USAGE,
+        device_group=KepcoDeviceGroup.USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=_common_usage,
@@ -329,7 +339,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
     KepcoSensorEntityDescription(
         key="previous_month_usage",
         translation_key="previous_month_usage",
-        device_group=KepcoDeviceGroup.METER_USAGE,
+        device_group=KepcoDeviceGroup.USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=_usage("previous_usage_kwh"),
@@ -337,7 +347,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
     KepcoSensorEntityDescription(
         key="last_year_same_month_usage",
         translation_key="last_year_same_month_usage",
-        device_group=KepcoDeviceGroup.METER_USAGE,
+        device_group=KepcoDeviceGroup.USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=_usage("last_year_usage_kwh"),
@@ -346,7 +356,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         key="current_period_usage",
         translation_key="current_period_usage",
         suggested_display_precision=2,
-        device_group=KepcoDeviceGroup.METER_USAGE,
+        device_group=KepcoDeviceGroup.USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=lambda bill, options: bill.current_period_usage_kwh,
@@ -355,7 +365,7 @@ METER_USAGE_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
         key="predicted_period_usage",
         translation_key="predicted_period_usage",
         suggested_display_precision=2,
-        device_group=KepcoDeviceGroup.METER_USAGE,
+        device_group=KepcoDeviceGroup.USAGE,
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
         value_fn=lambda bill, options: bill.predicted_period_usage_kwh,
@@ -499,6 +509,7 @@ GREENHOUSE_GAS_SENSOR_DESCRIPTIONS: tuple[KepcoSensorEntityDescription, ...] = (
 SENSOR_DESCRIPTIONS = (
     *MONTHLY_USAGE_SENSOR_DESCRIPTIONS,
     *METER_USAGE_SENSOR_DESCRIPTIONS,
+    *USAGE_SENSOR_DESCRIPTIONS,
     *ELECTRICITY_CHARGE_SENSOR_DESCRIPTIONS,
     *NEIGHBOR_COMPARISON_SENSOR_DESCRIPTIONS,
     *GREENHOUSE_GAS_SENSOR_DESCRIPTIONS,
@@ -515,6 +526,11 @@ def _device_identifier(customer: KepcoCustomer, group: KepcoDeviceGroup) -> str:
     if group is KepcoDeviceGroup.METER_USAGE:
         return customer.stable_key
     return f"{customer.stable_key}:{group.value}"
+
+
+def _sensor_applies_to_customer(customer: KepcoCustomer, key: str) -> bool:
+    """Return False for apartment comparisons on residential direct contracts."""
+    return key not in APARTMENT_NEIGHBOR_SENSOR_KEYS or not customer.is_house
 
 
 def _device_info(
@@ -566,7 +582,7 @@ async def async_setup_entry(
     entry: KepcoOnConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up five logical KEPCO ON devices and their bill sensors."""
+    """Set up six logical KEPCO ON devices and their bill sensors."""
     coordinator = entry.runtime_data.coordinator
     customers = coordinator.data.customers
     await _async_remove_stale_registry_entries(hass, entry, customers)
@@ -584,7 +600,100 @@ async def async_setup_entry(
         for customer in customers
         for description in SENSOR_DESCRIPTIONS
     ]
+    _async_migrate_device_groups(hass, entry, entities)
     async_add_entities(entities)
+
+
+def _async_group_device(
+    registry: dr.DeviceRegistry,
+    entry_id: str,
+    entity: KepcoOnSensor,
+) -> DeviceEntry:
+    """Create a group once and inherit settings from its original device."""
+    customer = entity.customer
+    group = entity.entity_description.device_group
+    if target := registry.async_get_device_by_identifier(
+        (DOMAIN, _device_identifier(customer, group)), entry_id
+    ):
+        return target
+    parent_group = _DEVICE_GROUP_PARENTS.get(group, group)
+    parent = registry.async_get_device_by_identifier(
+        (DOMAIN, _device_identifier(customer, parent_group)), entry_id
+    )
+    target = registry.async_get_or_create(
+        config_entry_id=entry_id,
+        disabled_by=parent.disabled_by if parent is not None else None,
+        # The entity's own device info carries the v0.4.3 multi-customer name suffix.
+        **_device_info(customer, group, entity.device_name_suffix),
+    )
+    if parent is not None:
+        registry.async_update_device(target.id, area_id=parent.area_id, labels=set(parent.labels))
+        target = registry.async_get(target.id)
+        assert target is not None
+    return target
+
+
+def _async_migrate_device_groups(
+    hass: HomeAssistant,
+    entry: KepcoOnConfigEntry,
+    entities: list[KepcoOnSensor],
+) -> None:
+    """Move existing sensors without replacing IDs or user registry settings."""
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
+    expected = {entity.unique_id: entity for entity in entities}
+    selected_keys = {entity.customer.stable_key for entity in entities}
+    expected_identifiers = {
+        (DOMAIN, _device_identifier(entity.customer, entity.entity_description.device_group))
+        for entity in entities
+    }
+    registered_entries = er.async_entries_for_config_entry(entity_registry, entry.entry_id)
+    existing_customers = {
+        entity.customer.stable_key
+        for registered in registered_entries
+        if _is_this_entry_domain_entity(registered, entry.entry_id)
+        and registered.device_id is not None
+        and (entity := expected.get(registered.unique_id)) is not None
+    }
+    for entity in entities:
+        if entity.customer.stable_key in existing_customers:
+            _async_group_device(device_registry, entry.entry_id, entity)
+    for registered in registered_entries:
+        if (
+            not _is_this_entry_domain_entity(registered, entry.entry_id)
+            or registered.device_id is None
+        ):
+            continue
+        entity = expected.get(registered.unique_id)
+        if entity is None:
+            continue
+        old_device = device_registry.async_get(registered.device_id)
+        target = _async_group_device(device_registry, entry.entry_id, entity)
+        if registered.device_id == target.id:
+            continue
+        changes: dict[str, Any] = {"device_id": target.id}
+        if (
+            registered.area_id is None
+            and old_device is not None
+            and old_device.area_id is not None
+            and old_device.area_id != target.area_id
+        ):
+            changes["area_id"] = old_device.area_id
+        if registered.disabled_by == RegistryEntryDisabler.DEVICE and target.disabled_by is None:
+            # The platform would clear DEVICE when moving to an enabled device.
+            changes["disabled_by"] = RegistryEntryDisabler.USER
+        entity_registry.async_update_entity(registered.entity_id, **changes)
+
+    for device in dr.async_entries_for_config_entry(device_registry, entry.entry_id):
+        if (
+            _customer_key_from_device_identifiers(device.identifiers) in selected_keys
+            and not device.identifiers & expected_identifiers
+            and _device_owner_ids(device) == {entry.entry_id}
+            and not er.async_entries_for_device(
+                entity_registry, device.id, include_disabled_entities=True
+            )
+        ):
+            device_registry.async_remove_device(device.id)
 
 
 class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntity):
@@ -604,9 +713,14 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
     ) -> None:
         super().__init__(coordinator)
         self.customer = customer
-        self.entity_description = description
+        self.entity_description = (
+            description
+            if _sensor_applies_to_customer(customer, description.key)
+            else replace(description, entity_registry_enabled_default=False)
+        )
         self._options = options
         self._attr_unique_id = f"{customer.stable_key}_{description.key}"
+        self.device_name_suffix = device_name_suffix
         self._attr_device_info = _device_info(
             customer, description.device_group, device_name_suffix
         )
@@ -655,6 +769,8 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
     @property
     def native_value(self) -> KepcoSensorValue:
         """Return the current native sensor value."""
+        if not _sensor_applies_to_customer(self.customer, self.entity_description.key):
+            return None
         bill = self._bill()
         if bill is None or self.customer.stable_key in self.coordinator.data.errors_by_customer_key:
             return None
@@ -663,6 +779,8 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
     @property
     def extra_state_attributes(self) -> KepcoSensorAttributes:
         """Return non-sensitive billing context attributes."""
+        if not _sensor_applies_to_customer(self.customer, self.entity_description.key):
+            return {"data_status": "unsupported_profile"}
         bill = self._bill()
         if bill is None:
             return {}
@@ -728,7 +846,8 @@ async def _async_remove_stale_registry_entries(
     customers: Iterable[KepcoCustomer],
 ) -> None:
     """Remove stale entries and migrate integration-disabled legacy entities."""
-    selected_keys = {customer.stable_key for customer in customers}
+    selected_customers = {customer.stable_key: customer for customer in customers}
+    selected_keys = set(selected_customers)
     entity_registry = er.async_get(hass)
     for registry_entry in er.async_entries_for_config_entry(entity_registry, entry.entry_id):
         if not _is_this_entry_domain_entity(registry_entry, entry.entry_id):
@@ -739,6 +858,13 @@ async def _async_remove_stale_registry_entries(
         customer_key, sensor_key = parsed
         if customer_key not in selected_keys or sensor_key in REMOVED_SENSOR_KEYS:
             entity_registry.async_remove(registry_entry.entity_id)
+            continue
+        if not _sensor_applies_to_customer(selected_customers[customer_key], sensor_key):
+            # Keep user choices; only integration-owned defaults change.
+            if registry_entry.disabled_by is None:
+                entity_registry.async_update_entity(
+                    registry_entry.entity_id, disabled_by=RegistryEntryDisabler.INTEGRATION
+                )
             continue
         if (
             sensor_key in ACTIVE_SENSOR_KEYS

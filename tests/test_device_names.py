@@ -11,7 +11,8 @@ from .test_sensor import RAW_CUSTOMER_SECRET, RAW_HOUSE_SECRET, bill, customer, 
 
 GROUP_NAMES = {
     "monthly_usage": "월별 사용량",
-    "meter_usage": "검침/전기사용량",
+    "meter_usage": "검침 정보",
+    "usage": "전기사용량·예측",
     "electricity_charge": "전기요금",
     "neighbor_comparison": "이웃 전기사용량 비교",
     "greenhouse_gas": "온실가스 배출량",
@@ -56,7 +57,7 @@ async def test_several_customers_get_hash_suffixed_names_with_unchanged_ids() ->
         names.add(info["name"])
         for private in (RAW_CUSTOMER_SECRET, RAW_HOUSE_SECRET, "푸른아파트", "101동", "1001호"):
             assert private not in info["name"]
-    assert len(names) == 10
+    assert len(names) == 12
     for key in keys:
         assert {
             entity.entity_description.key
