@@ -696,8 +696,25 @@ async def _async_remove_stale_registry_entries(
         device_customer_key = _customer_key_from_device_identifiers(device_entry.identifiers)
         if device_customer_key is None or device_customer_key in selected_keys:
             continue
-        if set(device_entry.config_entries) == {entry.entry_id}:
+        if _device_owner_ids(device_entry) == {entry.entry_id}:
             device_registry.async_remove_device(device_entry.id)
+
+
+_MISSING = object()
+
+
+def _device_owner_ids(device_entry: DeviceEntry) -> set[str]:
+    """Return the config entries owning a device without the deprecated shim.
+
+    Home Assistant 2026.11 gives every stored device a single ``config_entry_id``;
+    reading the deprecated ``DeviceEntry.config_entries`` there runs ``report_usage``
+    (a full stack and ``sys.modules`` scan) on every access. Older cores only expose
+    ``config_entries``; composite devices still need the full owner set.
+    """
+    entry_id = getattr(device_entry, "config_entry_id", _MISSING)
+    if entry_id is _MISSING or getattr(device_entry, "is_composite_device", False):
+        return {str(owner) for owner in getattr(device_entry, "config_entries", ()) or ()}
+    return {str(entry_id)} if entry_id else set()
 
 
 def _sensor_identity_from_unique_id(unique_id: str) -> tuple[str, str] | None:

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2 — 2026-11-09
+
+- 선택에서 빠진 고객의 기기를 정리할 때 Home Assistant 2026.11에서 폐기된 `DeviceEntry.config_entries`를 읽지 않고 `config_entry_id`로 소유 항목을 확인합니다. 2026.11에서는 이 속성을 읽을 때마다 `report_usage()`가 전체 호출 스택과 `sys.modules`를 훑어, 기기가 많은 설치에서 이벤트 루프 부하가 커질 수 있었습니다. 여러 항목이 공유하는 복합 기기와 이전 Home Assistant 버전은 기존처럼 `config_entries`를 사용합니다.
+- 기기 정리 대상과 엔티티 ID·고유 ID·설정은 바뀌지 않습니다. 테스트는 가짜 레지스트리로만 수행했으며 운영 Home Assistant에서는 확인하지 않았습니다.
+
 ## 0.4.1 — 2026-10-31
 
 - 통합 언로드, 설정 실패, 설정 흐름 종료 때 Home Assistant 공유 연결의 클라이언트 세션을 `close()` 대신 `detach()`로 정리합니다. Home Assistant가 만든 세션의 `close()`는 경고만 기록하고 세션을 닫지 않아, 언로드할 때마다 쿠키 세션이 남고 "closes the Home Assistant aiohttp session" 경고가 기록될 수 있었습니다. 기여자 [@blazepsyki](https://github.com/blazepsyki)의 PR #17입니다.
