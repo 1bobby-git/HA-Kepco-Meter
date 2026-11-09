@@ -99,7 +99,7 @@ async def test_house_bill_combines_main_chart_and_power_planner() -> None:
                     "searchType": "",
                     "dong": "",
                     "ho": "",
-                    "months": "24",
+                    "months": "13",
                     "chgYmd": "202604",
                 }
             },
@@ -279,6 +279,8 @@ async def test_house_requested_month_uses_matching_detail_without_current_planne
         del submission_id
         calls.append(path)
         if path == ENDPOINT_MAIN_CHART:
+            search = cast("dict[str, object]", cast("dict[str, object]", payload)["dma_search"])
+            assert (search["schYm"], search["months"]) == ("202607", "24")
             return _load_fixture("house_main_chart.json")
         assert path == ENDPOINT_HOUSE_BILL_DETAIL
         assert (

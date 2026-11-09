@@ -384,7 +384,9 @@ class KepcoOnClient:
             "searchType": "",
             "dong": "",
             "ho": "",
-            "months": "24",
+            # Polling keeps the captured 13-month request; the response action may
+            # ask for a month up to 24 months back, so only it requests 24 months.
+            "months": "24" if requested_month else "13",
             "chgYmd": chg_ym,
         }
         payload = await self._auth.async_protected_request(

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from enum import StrEnum
+from hashlib import sha256
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -148,11 +150,17 @@ def _history_amount(bill: KepcoBill, month: str) -> int | None:
     return None
 
 
+_USAGE_SPLIT_FIELDS = frozenset({"household_usage_kwh", "common_usage_kwh"})
+
+
 def _household_usage(bill: KepcoBill, options: dict[str, Any]) -> int | None:
     """Return household usage, deriving it only when the response omits one side."""
     del options
     if bill.household_usage_kwh is not None:
         return bill.household_usage_kwh
+    if bill.invalid_fields & _USAGE_SPLIT_FIELDS:
+        # An unreadable split value is not an omitted one; do not assume a split.
+        return None
     if bill.usage_kwh is None:
         return None
     if bill.common_usage_kwh is None:
@@ -166,6 +174,8 @@ def _common_usage(bill: KepcoBill, options: dict[str, Any]) -> int | None:
     del options
     if bill.common_usage_kwh is not None:
         return bill.common_usage_kwh
+    if bill.invalid_fields & _USAGE_SPLIT_FIELDS:
+        return None
     if bill.usage_kwh is None:
         return None
     if bill.household_usage_kwh is None:
@@ -507,16 +517,48 @@ def _device_identifier(customer: KepcoCustomer, group: KepcoDeviceGroup) -> str:
     return f"{customer.stable_key}:{group.value}"
 
 
-def _device_info(customer: KepcoCustomer, group: KepcoDeviceGroup) -> DeviceInfo:
+def _device_info(
+    customer: KepcoCustomer, group: KepcoDeviceGroup, name_suffix: str | None = None
+) -> DeviceInfo:
     """Return one privacy-safe logical device description."""
     group_name = _DEVICE_GROUP_NAMES[group]
     return {
         "identifiers": {(DOMAIN, _device_identifier(customer, group))},
-        "name": group_name,
+        "name": f"{group_name} ({name_suffix})" if name_suffix else group_name,
         "manufacturer": "한국전력공사(KEPCO)",
         "model": "한전ON",
         "configuration_url": PAGE_URL,
     }
+
+
+DEVICE_NAME_SUFFIX_LENGTH = 4
+_CUSTOMER_HASH_PATTERN = re.compile(r"[0-9a-f]{64}")
+
+
+def _customer_name_hash(stable_key: str) -> str:
+    """Return the integration customer hash that a device name may show."""
+    if _CUSTOMER_HASH_PATTERN.fullmatch(stable_key):
+        return stable_key
+    # Stored keys are integration hashes. Hash anything else rather than display it.
+    return sha256(stable_key.encode()).hexdigest()
+
+
+def _device_name_suffixes(customers: Iterable[KepcoCustomer]) -> dict[str, str]:
+    """Return short customer-hash prefixes that tell several customers' devices apart.
+
+    The prefix comes from the integration-generated customer hash, never from KEPCO
+    customer numbers, names or addresses. One customer keeps the plain device names.
+    """
+    hashes = {
+        customer.stable_key: _customer_name_hash(customer.stable_key) for customer in customers
+    }
+    if len(hashes) < 2:
+        return {}
+    length = DEVICE_NAME_SUFFIX_LENGTH
+    # Distinct hashes differ within their 64 characters; the bound keeps this finite.
+    while length < 64 and len({value[:length] for value in hashes.values()}) < len(hashes):
+        length += 1
+    return {key: value[:length] for key, value in hashes.items()}
 
 
 async def async_setup_entry(
@@ -529,9 +571,16 @@ async def async_setup_entry(
     customers = coordinator.data.customers
     await _async_remove_stale_registry_entries(hass, entry, customers)
     options = dict(entry.options)
+    suffixes = _device_name_suffixes(customers)
 
     entities = [
-        KepcoOnSensor(coordinator, customer, description, options)
+        KepcoOnSensor(
+            coordinator,
+            customer,
+            description,
+            options,
+            device_name_suffix=suffixes.get(customer.stable_key),
+        )
         for customer in customers
         for description in SENSOR_DESCRIPTIONS
     ]
@@ -550,13 +599,17 @@ class KepcoOnSensor(CoordinatorEntity[KepcoOnDataUpdateCoordinator], SensorEntit
         customer: KepcoCustomer,
         description: KepcoSensorEntityDescription,
         options: dict[str, Any],
+        *,
+        device_name_suffix: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         self.customer = customer
         self.entity_description = description
         self._options = options
         self._attr_unique_id = f"{customer.stable_key}_{description.key}"
-        self._attr_device_info = _device_info(customer, description.device_group)
+        self._attr_device_info = _device_info(
+            customer, description.device_group, device_name_suffix
+        )
         self._refresh_month_translation_placeholders()
 
     def _bill(self) -> KepcoBill | None:
@@ -698,8 +751,25 @@ async def _async_remove_stale_registry_entries(
         device_customer_key = _customer_key_from_device_identifiers(device_entry.identifiers)
         if device_customer_key is None or device_customer_key in selected_keys:
             continue
-        if set(device_entry.config_entries) == {entry.entry_id}:
+        if _device_owner_ids(device_entry) == {entry.entry_id}:
             device_registry.async_remove_device(device_entry.id)
+
+
+_MISSING = object()
+
+
+def _device_owner_ids(device_entry: DeviceEntry) -> set[str]:
+    """Return the config entries owning a device without the deprecated shim.
+
+    Home Assistant 2026.11 gives every stored device a single ``config_entry_id``;
+    reading the deprecated ``DeviceEntry.config_entries`` there runs ``report_usage``
+    (a full stack and ``sys.modules`` scan) on every access. Older cores only expose
+    ``config_entries``; composite devices still need the full owner set.
+    """
+    entry_id = getattr(device_entry, "config_entry_id", _MISSING)
+    if entry_id is _MISSING or getattr(device_entry, "is_composite_device", False):
+        return {str(owner) for owner in getattr(device_entry, "config_entries", ()) or ()}
+    return {str(entry_id)} if entry_id else set()
 
 
 def _sensor_identity_from_unique_id(unique_id: str) -> tuple[str, str] | None:

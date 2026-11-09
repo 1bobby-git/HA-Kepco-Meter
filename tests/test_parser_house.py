@@ -216,6 +216,27 @@ def test_house_detail_populates_existing_bill_fields() -> None:
     assert bill.history[-1].amount_krw == bill.amount_krw
 
 
+def test_house_detail_clears_only_chart_fields_it_supplies() -> None:
+    chart = _load("house_main_chart.json")
+    rows = cast("list[dict[str, object]]", chart["dlt_chart"])
+    rows[0].update({"kwh": "bad", "afterMny": "bad"})
+    rows[1]["kwh"] = "bad"
+    history_bill = parse_house_bill(chart)
+    assert {"usage_kwh", "amount_krw", "previous_usage_kwh"} <= history_bill.invalid_fields
+
+    payload = _load("house_bill_detail.json")
+    cast("dict[str, object]", payload["dma_charge"])["befKwh"] = ""
+    bill = parse_house_bill_detail(payload, history_bill)
+
+    assert bill.usage_kwh == 603
+    assert bill.amount_krw == 118810
+    assert bill.previous_usage_kwh is None
+    assert "usage_kwh" not in bill.invalid_fields
+    assert "amount_krw" not in bill.invalid_fields
+    assert "previous_usage_kwh" in bill.invalid_fields
+    assert "history.usage_kwh" in bill.invalid_fields
+
+
 @pytest.mark.parametrize("month", ["07", "09"])
 def test_house_detail_rejects_different_month(month: str) -> None:
     payload = _load("house_bill_detail.json")

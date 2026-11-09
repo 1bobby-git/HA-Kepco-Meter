@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import date
 from hashlib import sha256
@@ -229,19 +231,23 @@ def parse_house_bill(payload: dict[str, object], requested_month: str | None = N
         raise KepcoOnProtocolError("house bill chart is missing")
 
     points: list[tuple[str, KepcoUsageHistoryPoint, object]] = []
+    invalid_by_month: dict[str, set[str]] = {}
     for item in raw_rows:
         if not isinstance(item, dict):
             raise KepcoOnProtocolError("house bill entries must be objects")
         month = parse_year_month(item.get("jojYmFilter"), "house_bill_month")
         if month is None:
             raise KepcoOnProtocolError("house bill month is missing")
+        row_invalid = invalid_by_month.setdefault(month, set())
         points.append(
             (
                 month,
                 KepcoUsageHistoryPoint(
                     month=month,
-                    usage_kwh=parse_int(item.get("kwh"), "house_usage"),
-                    amount_krw=parse_int(item.get("afterMny"), "house_amount"),
+                    usage_kwh=_optional_field(row_invalid, parse_int, item.get("kwh"), "usage_kwh"),
+                    amount_krw=_optional_field(
+                        row_invalid, parse_int, item.get("afterMny"), "amount_krw"
+                    ),
                 ),
                 item.get("gigan"),
             )
@@ -259,16 +265,26 @@ def parse_house_bill(payload: dict[str, object], requested_month: str | None = N
     # mainChart has no separate previous/last-year fields; the same response's
     # 13-month history carries them, like DO_BEF_KWH/DO_LAST_YEAR_KWH for apartments.
     usage_by_month = {point.month: point.usage_kwh for point in history}
+    previous_month = _shift_month(latest_month, -1)
+    last_year_month = _shift_month(latest_month, -12)
+    invalid = {f"history.{name}" for names in invalid_by_month.values() for name in names}
+    invalid.update(invalid_by_month[latest_month])
+    if "usage_kwh" in invalid_by_month.get(previous_month, ()):
+        invalid.add("previous_usage_kwh")
+    if "usage_kwh" in invalid_by_month.get(last_year_month, ()):
+        invalid.add("last_year_usage_kwh")
+    _log_invalid_optional_fields(invalid)
     return KepcoBill(
         bill_month=latest_month,
         response_bill_month=latest_month,
         period_start=period_start,
         period_end=period_end,
         usage_kwh=latest_point.usage_kwh,
-        previous_usage_kwh=usage_by_month.get(_shift_month(latest_month, -1)),
-        last_year_usage_kwh=usage_by_month.get(_shift_month(latest_month, -12)),
+        previous_usage_kwh=usage_by_month.get(previous_month),
+        last_year_usage_kwh=usage_by_month.get(last_year_month),
         amount_krw=latest_point.amount_krw,
         history=history,
+        invalid_fields=frozenset(invalid),
     )
 
 
@@ -305,20 +321,29 @@ def parse_house_bill_detail(payload: dict[str, object], bill: KepcoBill) -> Kepc
             raise KepcoOnProtocolError("house bill charge field is ambiguous")
         charges[field] = value
 
-    def usage(field: str, fallback: int | None) -> int | None:
+    # Chart fields the detail supplies directly are no longer unreadable.
+    supplied: set[str] = set()
+
+    def usage(field: str, name: str, fallback: int | None) -> int | None:
         value = parse_int(result.get(field), field)
-        return value if value is not None else fallback
+        if value is None:
+            return fallback
+        supplied.add(name)
+        return value
 
     amount = charges.pop("amount_krw", None)
-    amount = amount if amount is not None else bill.amount_krw
-    current_usage = usage("kwh", bill.usage_kwh)
+    if amount is None:
+        amount = bill.amount_krw
+    else:
+        supplied.add("amount_krw")
+    current_usage = usage("kwh", "usage_kwh", bill.usage_kwh)
     return replace(
         bill,
         period_start=_parse_house_detail_date(result.get("fromMmdd")) or bill.period_start,
         period_end=_parse_house_detail_date(result.get("toMmdd")) or bill.period_end,
         usage_kwh=current_usage,
-        previous_usage_kwh=usage("befKwh", bill.previous_usage_kwh),
-        last_year_usage_kwh=usage("lastYearKwh", bill.last_year_usage_kwh),
+        previous_usage_kwh=usage("befKwh", "previous_usage_kwh", bill.previous_usage_kwh),
+        last_year_usage_kwh=usage("lastYearKwh", "last_year_usage_kwh", bill.last_year_usage_kwh),
         current_meter_reading=_parse_house_reading(result.get("whmMtrAlw")),
         previous_meter_reading=_parse_house_reading(result.get("bfrMtrAlw")),
         meter_reading_day=_parse_house_reading_day(result.get("gumchmDd")),
@@ -331,6 +356,7 @@ def parse_house_bill_detail(payload: dict[str, object], bill: KepcoBill) -> Kepc
         ),
         charge=KepcoChargeBreakdown(**charges),
         house_detail_status="ok",
+        invalid_fields=bill.invalid_fields - supplied,
     )
 
 
@@ -470,46 +496,77 @@ def parse_bill(payload: dict[str, object], requested_month: str | None) -> Kepco
     if effective_month is None:
         raise KepcoOnProtocolError("bill month is missing")
 
-    history = _parse_history(payload)
+    history_invalid: set[str] = set()
+    history = _parse_history(payload, history_invalid)
     _validate_history_consistency(history, effective_month, response_bill_month)
 
-    return KepcoBill(
+    # Status, month and history structure above stay strict. A value field below
+    # that has an unexpected format becomes None alone and is reported by name.
+    invalid: set[str] = {f"history.{name}" for name in history_invalid}
+
+    def number(source_key: str, name: str) -> int | None:
+        return _optional_field(invalid, parse_int, _field(result, source_key), name)
+
+    bill = KepcoBill(
         bill_month=effective_month,
         response_bill_month=response_bill_month,
-        period_start=parse_date(_field(result, "DO_FROM_MMDD"), "period_start"),
-        period_end=parse_date(_field(result, "DO_TO_MMDD"), "period_end"),
-        usage_kwh=parse_int(_field(result, "DO_KWH"), "usage_kwh"),
-        household_usage_kwh=parse_int(_field(result, "DO_TP_RSD_KWH"), "household_usage_kwh"),
-        common_usage_kwh=parse_int(_field(result, "DO_TP_CMNUS_KWH"), "common_usage_kwh"),
-        previous_usage_kwh=parse_int(_field(result, "DO_BEF_KWH"), "previous_usage_kwh"),
-        last_year_usage_kwh=parse_int(_field(result, "DO_LAST_YEAR_KWH"), "last_year_usage_kwh"),
-        building_average_kwh=parse_int(
-            _field(result, "DO_APT_HOUS_USKI_AVG"),
-            "building_average_kwh",
+        period_start=_optional_field(
+            invalid, parse_date, _field(result, "DO_FROM_MMDD"), "period_start"
         ),
-        apartment_average_kwh=parse_int(
-            _field(result, "DO_APT_TOT_USKI_AVG"),
-            "apartment_average_kwh",
+        period_end=_optional_field(invalid, parse_date, _field(result, "DO_TO_MMDD"), "period_end"),
+        usage_kwh=number("DO_KWH", "usage_kwh"),
+        household_usage_kwh=number("DO_TP_RSD_KWH", "household_usage_kwh"),
+        common_usage_kwh=number("DO_TP_CMNUS_KWH", "common_usage_kwh"),
+        previous_usage_kwh=number("DO_BEF_KWH", "previous_usage_kwh"),
+        last_year_usage_kwh=number("DO_LAST_YEAR_KWH", "last_year_usage_kwh"),
+        building_average_kwh=number("DO_APT_HOUS_USKI_AVG", "building_average_kwh"),
+        apartment_average_kwh=number("DO_APT_TOT_USKI_AVG", "apartment_average_kwh"),
+        current_meter_reading=number("DO_WHM_MTR_ALW", "current_meter_reading"),
+        previous_meter_reading=number("DO_BEF_MTR_ALW", "previous_meter_reading"),
+        meter_reading_day=_optional_field(
+            invalid, parse_day_of_month, _field(result, "DO_GUMCHM_DD"), "meter_reading_day"
         ),
-        current_meter_reading=parse_int(_field(result, "DO_WHM_MTR_ALW"), "current_meter_reading"),
-        previous_meter_reading=parse_int(
-            _field(result, "DO_BEF_MTR_ALW"), "previous_meter_reading"
-        ),
-        meter_reading_day=parse_day_of_month(_field(result, "DO_GUMCHM_DD"), "meter_reading_day"),
-        amount_krw=parse_int(_field(result, "DO_PRE_REQ_BILL"), "amount_krw"),
+        amount_krw=number("DO_PRE_REQ_BILL", "amount_krw"),
         charge=KepcoChargeBreakdown(
-            subtotal_krw=parse_int(_field(result, "DO_PRE_BILL"), "subtotal"),
-            base_krw=parse_int(_field(result, "DO_PRE_BASE_BILL"), "base"),
-            energy_krw=parse_int(_field(result, "DO_PRE_KWHBILL"), "energy"),
-            climate_krw=parse_int(_field(result, "DO_PRE_CLMT_ENVRN_BILL"), "climate"),
-            fuel_krw=parse_int(_field(result, "DO_PRE_FUEL_COST_ADJ_BILL"), "fuel"),
-            child_discount_krw=parse_int(_field(result, "DO_PRE_CHILD_DC_BILL"), "child_discount"),
-            vat_krw=parse_int(_field(result, "DO_PRE_BILL_VAT"), "vat"),
-            fund_krw=parse_int(_field(result, "DO_PRE_PUBCHGE"), "fund"),
-            rounding_krw=parse_int(_field(result, "DO_PRE_REQ_BILLODD"), "rounding"),
+            subtotal_krw=number("DO_PRE_BILL", "charge.subtotal_krw"),
+            base_krw=number("DO_PRE_BASE_BILL", "charge.base_krw"),
+            energy_krw=number("DO_PRE_KWHBILL", "charge.energy_krw"),
+            climate_krw=number("DO_PRE_CLMT_ENVRN_BILL", "charge.climate_krw"),
+            fuel_krw=number("DO_PRE_FUEL_COST_ADJ_BILL", "charge.fuel_krw"),
+            child_discount_krw=number("DO_PRE_CHILD_DC_BILL", "charge.child_discount_krw"),
+            vat_krw=number("DO_PRE_BILL_VAT", "charge.vat_krw"),
+            fund_krw=number("DO_PRE_PUBCHGE", "charge.fund_krw"),
+            rounding_krw=number("DO_PRE_REQ_BILLODD", "charge.rounding_krw"),
         ),
         history=history,
     )
+    _log_invalid_optional_fields(invalid)
+    return dataclasses.replace(bill, invalid_fields=frozenset(invalid))
+
+
+def _optional_field[T](
+    invalid: set[str],
+    parse: Callable[[object, str], T | None],
+    value: object,
+    name: str,
+) -> T | None:
+    """Parse one optional field; record only its name when the format is unexpected."""
+    try:
+        return parse(value, name)
+    except KepcoOnProtocolError:
+        invalid.add(name)
+        return None
+
+
+def _log_invalid_optional_fields(invalid: set[str]) -> None:
+    if invalid:
+        # Field names and a count only; the unexpected values are never logged.
+        _LOGGER.warning(
+            "KEPCO ON bill response has %d optional field(s) with an unexpected format; "
+            "only the sensors that use them are unknown: %s",
+            len(invalid),
+            ", ".join(sorted(invalid)),
+        )
 
 
 def _customer_rows(payload: dict[str, object]) -> list[object]:
@@ -537,7 +594,9 @@ def _raise_for_bill_status(payload: dict[str, object], result: dict[str, object]
         raise KepcoOnProtocolError("KEPCO ON bill status is not successful")
 
 
-def _parse_history(payload: dict[str, object]) -> tuple[KepcoUsageHistoryPoint, ...]:
+def _parse_history(
+    payload: dict[str, object], invalid: set[str]
+) -> tuple[KepcoUsageHistoryPoint, ...]:
     if "history" in payload:
         raise KepcoOnProtocolError("bill history must use dlt_chrtList")
     raw_history = payload.get("dlt_chrtList")
@@ -564,8 +623,10 @@ def _parse_history(payload: dict[str, object]) -> tuple[KepcoUsageHistoryPoint, 
         history.append(
             KepcoUsageHistoryPoint(
                 month=month,
-                usage_kwh=parse_int(item.get("DO_CHRT_KWH"), "history_usage"),
-                amount_krw=parse_int(item.get("DO_CHRT_AFTR_MNY"), "history_amount"),
+                usage_kwh=_optional_field(invalid, parse_int, item.get("DO_CHRT_KWH"), "usage_kwh"),
+                amount_krw=_optional_field(
+                    invalid, parse_int, item.get("DO_CHRT_AFTR_MNY"), "amount_krw"
+                ),
             )
         )
     return tuple(history)

@@ -169,6 +169,9 @@ class KepcoBill:
     power_planner_return_code: str | None = None
     power_planner_current_status: str | None = None
     power_planner_prediction_status: str | None = None
+    # Names (never values) of optional fields whose format was not recognised.
+    # Those fields are None; "history.<name>" marks a field of one history point.
+    invalid_fields: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
