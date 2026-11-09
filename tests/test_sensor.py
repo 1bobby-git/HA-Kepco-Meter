@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import date
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, cast
@@ -646,7 +647,13 @@ async def test_multiple_customer_device_names_are_distinct_and_privacy_safe() ->
         if entity.entity_description.key == "monthly_usage"
     ]
 
-    assert {device["name"] for device in meter_devices} == {"검침/전기사용량"}
+    # v0.4.3: several customers get a short customer-hash suffix so the devices
+    # can be told apart; identifiers and unique_ids keep the v0.4.2 values.
+    # These test keys are not integration hashes, so the suffix hashes them first.
+    assert {device["name"] for device in meter_devices} == {
+        f"검침/전기사용량 ({sha256(b'cust-a').hexdigest()[:4]})",
+        f"검침/전기사용량 ({sha256(b'cust-b').hexdigest()[:4]})",
+    }
     assert {next(iter(device["identifiers"])) for device in meter_devices} == {
         (DOMAIN, "cust-a"),
         (DOMAIN, "cust-b"),
@@ -655,6 +662,8 @@ async def test_multiple_customer_device_names_are_distinct_and_privacy_safe() ->
     assert RAW_CUSTOMER_SECRET not in rendered
     assert RAW_HOUSE_SECRET not in rendered
     assert RAW_NAME_SECRET not in rendered
+    assert "비밀아파트" not in rendered
+    assert "0304" not in rendered
 
 
 @pytest.mark.asyncio
