@@ -76,7 +76,7 @@ class KepcoOnDataUpdateCoordinator(DataUpdateCoordinator[KepcoCoordinatorData]):
         protocol_error_seen = False
         for customer in self.customers:
             try:
-                bills[customer.stable_key] = await self.client.async_get_bill(customer)
+                bill = await self.client.async_get_bill(customer)
             except (KepcoOnSessionExpired, KepcoOnAuthError) as err:
                 del err
                 raise ConfigEntryAuthFailed("KEPCO ON authentication expired") from None
@@ -89,6 +89,12 @@ class KepcoOnDataUpdateCoordinator(DataUpdateCoordinator[KepcoCoordinatorData]):
                 errors[customer.stable_key] = _safe_customer_error(err)
             except KepcoOnError as err:
                 errors[customer.stable_key] = _safe_customer_error(err)
+            else:
+                bills[customer.stable_key] = bill
+                if bill.invalid_fields:
+                    # The bill stays usable; only sensors of these fields are unknown.
+                    protocol_error_seen = True
+                    async_create_issue(self.hass, self.entry, "bill_schema_changed")
 
         if not bills:
             raise UpdateFailed("No KEPCO ON selected customers updated")
