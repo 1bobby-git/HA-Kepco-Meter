@@ -219,7 +219,7 @@ def test_tests_workflow_runs_required_ci_gates_without_continue_on_error() -> No
         "cache": "pip",
         "cache-dependency-path": "requirements_test.txt",
     }
-    assert cast("dict[str, Any]", steps[3]["with"]) == {"node-version": "24.22.1", "cache": "npm"}
+    assert cast("dict[str, Any]", steps[3]["with"]) == {"node-version": "24.22.3", "cache": "npm"}
     assert run_values(steps) == [
         "python -m pip install -r requirements_test.txt",
         "npm ci",
