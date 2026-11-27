@@ -24,6 +24,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from custom_components.kepco_on.api import KepcoOnClient, KepcoOnTransport
 from custom_components.kepco_on.exceptions import (
+    KepcoOnAccessBlocked,
     KepcoOnConnectionError,
     KepcoOnProtocolError,
     KepcoOnRateLimitError,
@@ -155,7 +156,7 @@ async def test_transport_prepares_login_session_with_fixed_safe_get() -> None:
     assert captured["path"] == "/MYM001D00"
     assert headers["Accept"] == "text/html,application/xhtml+xml"
     assert headers["Referer"] == ORIGIN
-    assert headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.4.4"
+    assert headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.4.5"
     assert "submissionid" not in headers
     assert "refreshToken" not in headers
 
@@ -244,7 +245,7 @@ async def test_transport_posts_json_headers_to_allowlisted_kepco_path() -> None:
     assert headers["Content-Type"] == "application/json; charset=UTF-8"
     assert headers["Referer"] == REFERER
     assert headers["Origin"] == ORIGIN
-    assert headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.4.4"
+    assert headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.4.5"
     assert headers["refreshToken"] == REFRESH_SECRET
     assert headers["submissionid"] == "mf_test"
     assert "sec-ch-ua" not in {key.lower() for key in headers}
@@ -1083,3 +1084,78 @@ async def test_client_get_all_current_bills_runs_sequentially() -> None:
 
     assert list(bills) == ["key-1", "key-2"]
     assert max_in_flight == 1
+
+
+PROTECTION_PAGE = (
+    '<html><head><script data-ws-mutable="true" src="/821a647c/a3ac5710"></script>'
+    "<title>한전ON</title></head><body>로그인 login</body></html>"
+)
+
+
+@pytest.mark.asyncio
+async def test_transport_reports_web_protection_page_as_access_blocked() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/cyb/me/login/indi/api",
+        "post",
+        response=Response(text=PROTECTION_PAGE, content_type="text/html"),
+    )
+
+    with pytest.raises(KepcoOnAccessBlocked) as raised:
+        await with_transport(
+            lambda transport: transport.request_json(
+                "/cyb/me/login/indi/api", {"pwdVal": PASSWORD_SECRET}
+            ),
+            server,
+        )
+
+    message = str(raised.value)
+    assert "HTTP 200" in message
+    assert "body=html" in message
+    assert PASSWORD_SECRET not in message
+
+
+@pytest.mark.asyncio
+async def test_transport_reports_protected_403_as_access_blocked() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/cyb/me/login/indi/api",
+        "post",
+        response=Response(
+            text="denied",
+            status=403,
+            headers={"x-ws-origin-status": "blocked"},
+            content_type="text/plain",
+        ),
+    )
+
+    with pytest.raises(KepcoOnAccessBlocked) as raised:
+        await with_transport(
+            lambda transport: transport.request_json("/cyb/me/login/indi/api", None),
+            server,
+        )
+
+    assert "HTTP 403" in str(raised.value)
+    assert "protection_header=present" in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_transport_plain_401_stays_session_expired_with_shape() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/sessionCheck",
+        "post",
+        response=Response(text="", status=401, content_type="text/plain"),
+    )
+
+    with pytest.raises(KepcoOnSessionExpired) as raised:
+        await with_transport(
+            lambda transport: transport.request_json("/sessionCheck", None),
+            server,
+        )
+
+    assert not isinstance(raised.value, KepcoOnAccessBlocked)
+    assert "HTTP 401" in str(raised.value)

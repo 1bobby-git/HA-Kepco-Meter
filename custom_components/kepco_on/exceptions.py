@@ -37,6 +37,15 @@ class KepcoOnRateLimitError(KepcoOnConnectionError):
         self.retry_after = retry_after
 
 
+class KepcoOnAccessBlocked(KepcoOnConnectionError):
+    """KEPCO ON's web protection layer rejected a non-browser request.
+
+    This is not a credential or session problem, so it must never trigger a
+    reauthentication flow. It is treated as a temporary failure because the
+    site operator may relax the policy again.
+    """
+
+
 class KepcoOnProtocolError(KepcoOnError):
     """KEPCO ON returned an unexpected protocol shape."""
 

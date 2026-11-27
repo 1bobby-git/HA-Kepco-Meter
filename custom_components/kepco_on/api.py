@@ -30,6 +30,7 @@ from .const import (
     VERSION,
 )
 from .exceptions import (
+    KepcoOnAccessBlocked,
     KepcoOnConnectionError,
     KepcoOnProtocolError,
     KepcoOnRateLimitError,
@@ -128,6 +129,38 @@ async def _read_bounded_body(
 def _is_json_content_type(content_type: str) -> bool:
     lowered = content_type.lower()
     return lowered == "application/json" or lowered.endswith("+json")
+
+
+# Markers of the client-side web protection layer KEPCO ON put in front of the
+# site (a script that wraps fetch/XHR, sets the ``__ws`` cookie and answers
+# with ``x-ws-*`` headers). A plain HTTP client that receives this markup on a
+# JSON API was blocked by that layer, not logged out.
+_PROTECTION_BODY_MARKERS = ("data-ws-mutable", "__wsflush", "__wsorig")
+_PROTECTION_HEADER = "x-ws-origin-status"
+
+
+def _looks_like_protection_markup(body: bytes) -> bool:
+    prefix = body[:16384].decode("utf-8", errors="ignore").lower()
+    return any(marker in prefix for marker in _PROTECTION_BODY_MARKERS)
+
+
+def _response_shape(response: ClientResponse, body: bytes | None) -> str:
+    """Return a secret-free description of a response for diagnostics."""
+    if body is None:
+        kind = "unread"
+    elif not body.strip():
+        kind = "empty"
+    elif body.lstrip().startswith((b"{", b"[")):
+        kind = "json"
+    elif b"<html" in body[:4096].lower():
+        kind = "html"
+    else:
+        kind = "other"
+    protection = response.headers.get(_PROTECTION_HEADER)
+    return (
+        f"HTTP {response.status}, content-type={response.content_type or 'none'}, "
+        f"body={kind}, protection_header={'present' if protection else 'absent'}"
+    )
 
 
 def _looks_like_login_markup(body: bytes) -> bool:
@@ -262,22 +295,39 @@ class KepcoOnTransport:
             await self._sleep(min(retry_after, MAX_RETRY_AFTER_SECONDS))
             raise KepcoOnRateLimitError("KEPCO ON rate limit was reached", retry_after=retry_after)
         if response.status in (401, 403):
-            raise KepcoOnSessionExpired("KEPCO ON session expired")
+            body = await _read_bounded_body(response)
+            if response.status == 403 and (
+                _looks_like_protection_markup(body) or response.headers.get(_PROTECTION_HEADER)
+            ):
+                raise KepcoOnAccessBlocked(
+                    "KEPCO ON web protection rejected the request "
+                    f"({_response_shape(response, body)})"
+                )
+            raise KepcoOnSessionExpired(
+                f"KEPCO ON session expired ({_response_shape(response, body)})"
+            )
         if response.status == 204:
             return {}
         if response.status >= 400:
             raise KepcoOnConnectionError(f"KEPCO ON returned HTTP {response.status}")
 
         body = await _read_bounded_body(response)
+        if _looks_like_protection_markup(body):
+            raise KepcoOnAccessBlocked(
+                "KEPCO ON web protection answered instead of the API "
+                f"({_response_shape(response, body)})"
+            )
         if _looks_like_login_markup(body):
-            raise KepcoOnSessionExpired("KEPCO ON session expired")
+            raise KepcoOnSessionExpired(
+                f"KEPCO ON session expired ({_response_shape(response, body)})"
+            )
         if not body.strip():
             return {}
 
         content_type = response.content_type
         stripped = body.lstrip()
         if not _is_json_content_type(content_type) and not stripped.startswith((b"{", b"[")):
-            raise _safe_protocol_error("response is not JSON")
+            raise _safe_protocol_error(f"response is not JSON ({_response_shape(response, body)})")
         parsed: object | None
         try:
             parsed = json.loads(body.decode(response.charset or "utf-8"))

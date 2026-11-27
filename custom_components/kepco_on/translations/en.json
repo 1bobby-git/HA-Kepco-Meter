@@ -57,7 +57,8 @@
       "invalid_selection": "Select at least one valid customer.",
       "invalid_co2_factor": "CO2 factor must be greater than 0 and no more than 10.",
       "invalid_history_months": "History months must be from 1 to 24.",
-      "unknown": "Unexpected error."
+      "unknown": "Unexpected error.",
+      "access_blocked": "KEPCO ON blocked the automated request with its web protection. Your password is not the problem. Try again later."
     },
     "abort": {
       "already_configured": "This KEPCO ON account is already configured.",
@@ -145,6 +146,10 @@
     }
   },
   "issues": {
+    "access_blocked": {
+      "title": "KEPCO ON blocked the integration",
+      "description": "KEPCO ON's new web protection rejected the integration's request even though it is not a credential problem, so no reauthentication is needed. Home Assistant keeps retrying setup; check the integration's releases for an update."
+    },
     "login_schema_changed": {
       "title": "KEPCO ON login response changed",
       "description": "KEPCO ON returned an unexpected login response. The integration may need an update."

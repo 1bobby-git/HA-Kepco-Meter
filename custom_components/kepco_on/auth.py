@@ -18,7 +18,12 @@ from .const import (
     ENDPOINT_SSO_CHECK,
     PERSISTED_COOKIE_ALLOWLIST,
 )
-from .exceptions import KepcoOnAuthError, KepcoOnProtocolError, KepcoOnSessionExpired
+from .exceptions import (
+    KepcoOnAccessBlocked,
+    KepcoOnAuthError,
+    KepcoOnProtocolError,
+    KepcoOnSessionExpired,
+)
 from .models import KepcoAccountSession, KepcoCookie
 from .session_store import export_cookies, restore_cookies
 
@@ -72,6 +77,13 @@ def _require_str(payload: JsonObject, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise KepcoOnProtocolError(f"KEPCO ON authentication response is missing {field}")
     return value
+
+
+def _safe_error_code(value: object) -> str:
+    """Return KEPCO's short error code when it looks like one (e.g. E1001)."""
+    if isinstance(value, str) and 0 < len(value) <= 16 and value.isalnum():
+        return value
+    return _safe_value_shape(value)
 
 
 def _safe_value_shape(value: object) -> str:
@@ -302,20 +314,15 @@ class KepcoOnAuth:
         self._cookie_jar.clear()
         await self._transport.async_prepare_login_session()
         login_payload = _login_request_payload(trimmed_username, password)
-        payload = await self._transport.request_json(
-            ENDPOINT_LOGIN_INDI,
-            login_payload,
-            submission_id="mf_login_popup_wframe_sbm_submission4",
-        )
+        payload = await self._async_post_login(login_payload)
         if not payload:
-            payload = await self._transport.request_json(
-                ENDPOINT_LOGIN_INDI,
-                login_payload,
-                submission_id="mf_login_popup_wframe_sbm_submission4",
-            )
+            payload = await self._async_post_login(login_payload)
         payload = _login_response_payload(payload)
         if payload.get("result") == "NO":
-            raise KepcoOnAuthError("KEPCO ON authentication failed")
+            raise KepcoOnAuthError(
+                "KEPCO ON authentication failed "
+                f"(errorCode={_safe_error_code(payload.get('errorCode'))})"
+            )
         try:
             session = KepcoAccountSession(
                 refresh_token=_require_str(payload, "refreshToken"),
@@ -332,6 +339,23 @@ class KepcoOnAuth:
             ) from err
         await self._save_current_session(session)
         return session
+
+    async def _async_post_login(self, login_payload: JsonObject) -> JsonObject:
+        """POST the login form; a fresh login can never be a session expiry."""
+        try:
+            return await self._transport.request_json(
+                ENDPOINT_LOGIN_INDI,
+                login_payload,
+                submission_id="mf_login_popup_wframe_sbm_submission4",
+            )
+        except KepcoOnSessionExpired as err:
+            # The login endpoint answered with 401/403 or a login page even though
+            # the cookie jar was just reset. That is the site refusing an automated
+            # client, not wrong credentials or an expired session, so it must not
+            # send the user into a reauthentication loop.
+            raise KepcoOnAccessBlocked(
+                f"KEPCO ON refused the automated login request: {err}"
+            ) from err
 
     async def _async_persist_cookie_snapshot(self) -> None:
         """Persist rotated KEPCO session cookies without changing auth generation."""
