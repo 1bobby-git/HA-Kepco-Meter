@@ -3,6 +3,7 @@
   <img src="https://raw.githubusercontent.com/1bobby-git/brands/master/custom_integrations/kepco_on/logo%402x.png" alt="한전ON 로고" width="420">
 </p>
 <p align="center">
+  <a href="#서비스-중단-안내"><img src="https://img.shields.io/badge/Status-discontinued-red?style=flat-square" alt="Status discontinued"></a>
   <a href="https://github.com/1bobby-git/HA-Kepco-Meter/stargazers"><img src="https://img.shields.io/github/stars/1bobby-git/HA-Kepco-Meter?style=flat-square&logo=github&label=Stars" alt="GitHub Stars"></a>
   <a href="https://github.com/1bobby-git/HA-Kepco-Meter/releases"><img src="https://img.shields.io/github/v/release/1bobby-git/HA-Kepco-Meter?style=flat-square&label=Release" alt="Latest Release"></a>
   <a href="https://github.com/1bobby-git/HA-Kepco-Meter/blob/main/custom_components/kepco_on/manifest.json"><img src="https://img.shields.io/badge/Architecture-independent-0ea5e9?style=flat-square" alt="Architecture independent"></a>
@@ -13,8 +14,12 @@
 
 # 한전ON Home Assistant 커스텀 통합
 
-> [!WARNING]
-> **2026-11-27 현재 조회 중단 상태입니다.** 한전ON(`online.kepco.co.kr`)이 새 웹 보안 계층을 적용한 뒤로, 브라우저가 아닌 요청은 모든 API에서 `403 {"error":"WS_BLOCKED"}`로 거부됩니다. 이 계층은 브라우저에서 보안 스크립트를 실행해 작업증명과 지문 검증을 통과해야만 쿠키를 발급합니다. 이 통합은 그 검증을 우회하지 않으므로, 차단이 계속되는 동안에는 설정도 조회도 되지 않습니다. 비밀번호 문제가 아니니 재인증은 필요 없습니다. v0.4.5부터는 이 상태를 `한전ON이 통합 요청을 차단함` 수리 이슈로 알리고, 차단이 풀리면 자동으로 다시 조회합니다.
+## 서비스 중단 안내
+
+> [!CAUTION]
+> **이 통합은 2026-11-27부터 사용할 수 없습니다.** 한전ON에 새 웹 보안 계층이 적용되면서, Home Assistant처럼 브라우저가 아닌 프로그램의 요청은 모두 차단됩니다(`403 WS_BLOCKED`). 이 통합은 한전의 보안 검증을 우회하지 않으므로, 새로 설치하거나 설정해도 동작하지 않습니다. 비밀번호 문제가 아니라서 재인증해도 해결되지 않습니다.
+>
+> 이미 설치했다면 그대로 두어도 됩니다. 한전이 차단을 해제하면 자동으로 다시 조회합니다. 상황이 바뀌면 이 안내를 갱신하겠습니다.
 
 한전ON 개인(`INDI`) 계정의 아파트 단일·종합계약 및 주택용 직접계약 전기요금 조회를 Home Assistant 센서와 응답 액션으로 가져오는 비공식 커스텀 통합입니다. 실시간 스마트미터가 아니라 한전ON 청구/검침 페이지에서 확인되는 월별 요금 데이터 기반입니다.
 
@@ -150,7 +155,7 @@ Energy Dashboard에는 `당월지침` 센서를 전력 사용량 소스로 추�
 
 옵션에서 조정할 수 있는 값은 조회 주기, 온실가스 환산계수, 사용량 이력 응답 길이입니다. 조회 주기는 1·3·6·12·24시간 중 선택하며 기본값은 6시간입니다. 환산계수는 0보다 크고 10 이하이며 기본값은 `0.459`입니다. 이력 응답 길이는 1~24개월이며 기본값은 12개월입니다.
 
-`v0.1.x`에서 업그레이드하면 기존 주요 엔티티의 고유 ID를 유지하면서 5개 기기로 재배치합니다. `v0.2.0`에서 `v0.2.1`로 업그레이드하면 기존 엔티티 ID와 unique ID를 유지하면서 허브와 하위 기기 이름만 정리하고, 검침일·시작일·종료일을 `센서 정보` 영역으로 이동합니다. 과거 통합 기본값 때문에 비활성화된 상세 엔티티는 자동으로 활성화하고, 사용자가 직접 비활성화한 엔티티는 그대로 둡니다. 더 이상 사용하지 않는 `청구월` 단독 엔티티와 상세/CO₂ 생성 토글 옵션은 마이그레이션 과정에서 정리됩니다. `v0.2.1`에서 `v0.2.2`로 업그레이드하면 전기요금 기기의 10개 엔티티가 표의 전체 이름으로 표시됩니다. 기존 엔티티 ID와 unique ID는 유지됩니다. `v0.3.1`부터 주택용 직접계약과 Power Planner 센서 2개를 지원하며 기존 아파트/오피스텔 엔티티 고유 ID는 유지됩니다. `v0.3.3`에서는 한전ON 로그인 응답의 선택 토큰 누락을 허용하고, 로그인·계정 유형·고객 목록 단계의 응답 오류를 구분해 표시합니다. `v0.3.10`에서는 한전ON 인증 쿠키를 제한적으로 영속화하고 최소 성공 세션 검증 응답을 정상 처리합니다. `v0.3.11`에서는 `v0.3.9`에서 넘어온 쿠키 없는 레거시 세션을 자동 재로그인하거나 Home Assistant 재인증 흐름으로 전환해 일반 설정 오류를 방지합니다. `v0.4.1`에서는 세션 정리(`detach()`), 혼합 계약 계정의 고객 목록, 재인증의 고객 유지, 주택용 전월·전년동월 사용량을 개선했으며 기존 엔티티 ID와 unique ID는 유지됩니다. `v0.4.2`에서는 Home Assistant 2026.11에서 폐기된 기기 소유 항목 조회(`DeviceEntry.config_entries`)를 피해 이벤트 루프 부하를 줄였으며 동작은 같습니다. `v0.4.3`에서는 청구 응답의 선택 필드 하나가 형식이 달라도 그 필드를 쓰는 센서만 `unknown`이 되고, 고객을 둘 이상 선택한 항목의 기기 이름에 고객 해시 앞 4자리를 붙입니다. 기존 엔티티 ID, unique ID, 기기 식별자는 그대로입니다. `v0.4.5`에서는 주택용 직접계약의 요금 항목·지침·검침일을 같은 월의 청구 상세에서 채우고, 일시적인 조회 실패를 고객별로 분리해 짧은 간격으로 다시 조회하며, 사용량 7개 센서를 기존 `검침/전기사용량` 기기(새 이름 `검침 정보`)에서 새 `전기사용량·예측` 기기로 옮깁니다. 엔티티 ID·unique ID·비활성 설정과 기록은 유지되고, 새 기기는 원래 기기의 영역·라벨·비활성 상태를 이어받습니다. 주택용 직접계약의 `해당동`·`아파트 전체` 센서는 통합이 비활성화합니다. 업데이트 후 Home Assistant Core를 완전히 재시작하세요.
+버전별 변경 사항과 업그레이드 시 동작은 [CHANGELOG.md](CHANGELOG.md)를 참고하세요.
 
 재인증은 기존 계정의 비밀번호만 다시 받습니다. 다른 한전ON 계정으로 로그인되면 항목 업데이트가 거절됩니다. 재인증은 고객 선택을 바꾸지 않습니다. 설정된 고객이 계정에서 확인되지 않으면 항목을 그대로 둔 채 중단하므로, 재구성에서 고객 선택을 정리한 뒤 다시 재인증하세요. 고객 목록 응답에 형식이 잘못된 행이 있어 설정된 고객이 보이지 않으면 고객 목록 응답 변경으로 중단합니다. 이때는 고객을 지우지 말고 통합을 업데이트한 뒤 다시 시도하세요. 한전ON이 회원 이름을 다르게 반환해 내부 고객 키가 달라져도 고객번호와 계약번호가 같으면 기존 키와 고유 ID를 유지합니다.
 
@@ -256,70 +261,6 @@ Home Assistant에서 통합 항목을 삭제하면 이 통합이 소유한 항�
 
 ## English Summary
 
+**Discontinued (2026-11-27):** KEPCO ON now blocks all non-browser requests with a web-protection layer (`403 WS_BLOCKED`), and this integration does not bypass it, so it no longer works.
+
 This is an unofficial Home Assistant custom integration for KEPCO ON individual apartment billing. It exposes monthly billing sensors and response actions, not real-time meter telemetry. Store credentials only if you accept Home Assistant storage and backup risk.
-
-## 통합 업데이트 0.3.4
-
-- TCP/HTTP 분할 수신을 응답 전체로 오인하는 단일 read(n) 처리 수정
-- 기존 2 MiB 제한·요청 타임아웃·호스트/경로 제한·재시도·인증 실패 구분은 유지
-- 로그인 준비 페이지와 JSON 응답 모두 EOF까지 크기 제한을 지켜 수신
-- 이 패치는 이전 로그인 장애의 모든 원인이 해결됐다는 의미는 아니며 실제 계정 검증이 필요
-
-변경 내용, 검증 범위 및 롤백 방법: [최적화 문서](docs/OPTIMIZATION_2026-09-06.md). 펌웨어·브리지 앱은 변경하지 않으며, 운영 HA 설치·실기기 검증은 별도입니다.
-
-
-## v0.3.5: 종합계약과 파워플래너 진단
-
-- 아파트(종합계약), 아파트(종합계약/나)를 단일계약과 같은 청구 조회 경로로 허용합니다. 종합계약 청구 동작은 사용자 보고에 근거하며 이번 작업에서 실계정으로 재검증하지 않았습니다.
-- 아파트 최신 청구 조회에도 파워플래너를 연결합니다. 2026-09-06 확인한 공식 MYM001D00.xml의 dataInit처럼 custNo에는 세대계약번호 SI_CUST_NO를 사용하고 chgYmd에는 전체 계약변경일을 전달합니다. 아파트 전체 CUST_NO를 대신 보내지 않습니다.
-- 현재 검침기간 누적 사용량은 F_AP_QT의 유효한 숫자만 사용합니다. RETURN_CD가 제공되면서 00 이외이면 값을 채우지 않습니다. 코드 없는 기존 응답은 숫자 유효성을 검사합니다. 90 등의 정확한 서버 원인(AMI 미지원, 데이터 지연 등)은 코드만으로 단정하지 않습니다.
-- PREDICT_TOT는 공식 XML에서 예상 전기요금으로 설명되며 실제 kWh 단위가 검증되지 않았습니다. 기존의 무조건적인 kWh 매핑을 중단하고 한전 예측 사용량 엔티티의 ID는 유지합니다. 이 센서가 사용 불가로 표시되는 것은 수치 조작이나 임의 단위 변경을 막기 위한 조치입니다.
-- 두 엔티티의 속성 data_status, data_status_message, return_code에서 미제공/연결 실패/요청 제한/형식 오류/단위 미확인을 구분합니다. 현재 사용량에 과거 청구월·기간을 붙이지 않습니다.
-- 부가 조회가 실패해도 월별 청구 사용량·요금은 유지합니다. 인증 실패는 기존 재인증 흐름에 전달합니다. 명시적인 과거월 조회에는 현재 사용량을 섞지 않습니다.
-- 서버 null을 0으로, 청구 사용량을 현재 사용량으로, 예측 요금을 예측 kWh로 대체하지 않습니다. 실제 계약에 값이 제공되는지는 업데이트 후 확인이 필요합니다.
-
-업데이트: HACS에서 0.3.5를 내려받고 Home Assistant를 재시작합니다. 기존 통합을 삭제하거나 sed 수정을 다시 적용할 필요가 없습니다. 이 GitHub 배포는 운영 HA에 직접 설치하거나 재시작하지 않습니다.
-
-
-## 한전ON v0.3.6 — 종합계약 요청 복원 및 1차 진단 개선
-
-- 사용자 성공 재현에 따라 정확히 `아파트(종합계약)`인 고객은 파워플래너에 `custNo=customer_number`, `housCntrNo=house_contract_number`, `chgYmd=""`를 전달합니다. 임의 고객번호나 추가 엔드포인트를 사용하지 않습니다.
-- 이 계약의 현재 사용량 `F_AP_QT`는 사용자 보고에 근거한 Wh 프로필로 처리해 한 번만 1000으로 나눕니다. 단일계약·종합계약/나·주택용은 기존 요청 및 단위 처리를 유지합니다. 값 크기로 단위를 추측하지 않으며 서버 전체의 공통 규격으로 확정한 것은 아닙니다.
-- 예측 사용량의 `PREDICT_TOT` 에너지 단위는 아직 검증되지 않았습니다. v0.3.5의 표시 보류를 유지하며, 이 릴리스가 두 센서 모두 숫자를 보장하지는 않습니다.
-- 기존 `return_code`에 같은 값의 `provider_return_code` 별칭을 추가하고 `integration_version`, `request_variant`, `value_divisor`를 표시합니다. 필드 오류가 발생해도 안전하게 검증된 반환 코드를 보존합니다.
-- 부가 조회 실패는 월별 청구 데이터를 중단하지 않습니다. 과거월 조회에는 현재 사용량을 섞지 않고, 인증 만료와 취소는 기존 흐름에 전달합니다. 도메인·설정·고객 및 엔티티 ID는 유지합니다.
-
-### 적용 및 다음 확인
-
-HACS에서 0.3.6으로 업데이트 후 Home Assistant를 재시작합니다. 통합을 삭제하거나 종합계약 허용 sed 명령을 다시 실행할 필요가 없습니다.
-두 센서의 `data_status`, `return_code` 또는 `provider_return_code`, `data_status_message`, `integration_version`을 확인해 회신합니다. 속성 회신을 받은 뒤 요청 결과와 예측 단위에 관한 후속 수정을 별도 진행합니다. 비밀번호·토큰·쿠키·고객번호·원본 응답은 공개하지 마세요.
-
-이번 변경의 근거는 사용자 재현 코드와 계정 동작 보고입니다. 실제 사용자 HA/계정에 직접 접속하거나 예측 단위를 검증하지 않았습니다. 실제 서버 미제공 값을 0이나 과거 청구량으로 대체하지 않습니다.
-최소 Home Assistant 버전은 2026.8.3입니다. 문제가 생기면 HACS 재다운로드에서 0.3.5로 되돌릴 수 있습니다.
-
-
-## v0.3.7: 진단 속성 표시 복구
-
-0.3.5/0.3.6에서는 값이 없는 파워플래너 센서를 unavailable로 표시해 HA가 사용자 정의 속성을 숨겼습니다. 청구 조회가 정상인 경우 이제 누락값은 unknown으로 표시하고 진단 속성은 유지합니다. 전체/고객별 청구 조회 실패는 기존처럼 unavailable입니다. 숫자 생성이나 예측 단위 확정은 하지 않았습니다.
-
-[상태 확인 템플릿과 해석](docs/POWER_PLANNER_DIAGNOSTICS.md). 0.3.7 업데이트 후 Home Assistant를 재시작하며 통합 재등록은 필요 없습니다.
-
-
-## 한전ON v0.3.8
-
-### 종합계약의 두 파워플래너 센서 복원
-
-- 정확히 아파트(종합계약)에 대해 사용자가 정상 동작을 확인한 요청 조합을 유지합니다: custNo=customer_number, housCntrNo=house_contract_number, chgYmd="".
-- 같은 호환 프로필에서 F_AP_QT와 PREDICT_TOT를 각각 1000으로 나누어 기존 현재/예측 사용량 센서에 전달합니다. 종합계약 예측값을 항상 None으로 버리던 처리를 제거합니다. 추가 옵션이나 템플릿 입력은 필요 없습니다.
-- 변환은 사용자 재현 보고에 기반합니다. PREDICT_TOT의 물리적 의미와 단위가 한전의 모든 계약에서 같다고 확인한 것은 아니며, 공개 화면의 요금 설명과의 차이는 남아 있습니다. conversion_basis 속성에 user_reported_combined_contract를 표시합니다. 숫자가 그럴듯하다는 이유로 단위를 자동 추정하지 않습니다.
-- 두 필드의 파싱과 진단을 분리합니다. 한쪽 null 또는 비정상 숫자는 다른 정상값이나 청구 데이터를 지우지 않습니다. 실제 0은 보존하고 음수, bool, NaN/Infinity는 거부합니다. 서버 실패 코드를 무시하거나 값을 조작하지 않습니다.
-- HA 내부에는 나눗셈 결과 정밀도를 유지하고 표시 권장 소수점만 2자리로 지정합니다. 정상 청구 상태의 누락값은 unknown과 진단 속성을 함께 게시합니다.
-- 단일계약·종합계약/나·주택용의 요청/변환/예측 정책은 유지합니다. 기존 도메인, 설정, 34개 센서 및 unique_id를 유지하고 과거월에는 현재 사용량을 섞지 않습니다. 인증 만료와 취소는 정상 전파됩니다.
-
-### 적용과 검증 범위
-
-HACS에서 0.3.8로 업데이트한 후 Home Assistant 전체 재시작을 수행합니다. 통합 삭제, sed 재수정, 진단값 선제 회신은 필요 없습니다. 현재 값이 없는 경우에만 개별 data_status를 확인합니다.
-
-테스트는 합성 응답을 사용하는 파서·API·실제 HA 상태 머신·Jinja 템플릿 회귀입니다. 운영 HA와 실제 계정에는 접근하지 않았으므로 실계정에서의 완전 동작이나 한전 서버 데이터 제공을 보장하지 않습니다. 사용자 원본 응답/계정 정보/실제 사용량은 커밋하지 않습니다. 기존 기록이나 통계는 변경하지 않습니다.
-
-문제가 생기면 HACS 재다운로드에서 0.3.7을 선택할 수 있습니다. 최소 Home Assistant 버전은 2026.8.3입니다.
