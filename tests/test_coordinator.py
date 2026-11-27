@@ -30,6 +30,7 @@ from custom_components.kepco_on.const import (
     PLATFORMS,
 )
 from custom_components.kepco_on.exceptions import (
+    KepcoOnAccessBlocked,
     KepcoOnConnectionError,
     KepcoOnNoCustomersError,
     KepcoOnProtocolError,
@@ -777,6 +778,7 @@ async def test_setup_reports_and_clears_safe_repair_issues(
     assert await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry)) is True
 
     assert cleared == [
+        (entry.entry_id, "access_blocked"),
         (entry.entry_id, "login_schema_changed"),
         (entry.entry_id, "customer_schema_changed"),
         (entry.entry_id, "unsupported_account"),
@@ -1442,3 +1444,28 @@ async def test_real_coordinator_timer_recovers_without_manual_refresh(
     finally:
         remove_listener()
         await coordinator.async_shutdown()
+
+
+@pytest.mark.asyncio
+async def test_setup_maps_web_protection_block_to_not_ready_with_repair(
+    reset_fakes: list[FakeSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import custom_components.kepco_on as init_module
+
+    del reset_fakes
+    created: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        init_module,
+        "async_create_issue",
+        lambda hass, entry, kind: created.append((entry.entry_id, kind)),
+    )
+    monkeypatch.setattr(init_module, "async_clear_issue", lambda hass, entry, kind: None)
+    hass = FakeHass()
+    entry = make_entry(save_password=True)
+    FakeAuth.login_results = [KepcoOnAccessBlocked("KEPCO ON refused the automated login")]
+
+    with pytest.raises(ConfigEntryNotReady):
+        await init_module.async_setup_entry(cast("Any", hass), cast("Any", entry))
+
+    assert created == [(entry.entry_id, "access_blocked")]

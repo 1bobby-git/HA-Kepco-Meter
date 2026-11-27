@@ -14,6 +14,7 @@ from aiohttp import ClientSession, web
 from aresponses import Response, ResponsesMockServer
 from custom_components.kepco_on.auth import KepcoOnAuth, _safe_value_shape
 from custom_components.kepco_on.exceptions import (
+    KepcoOnAccessBlocked,
     KepcoOnAuthError,
     KepcoOnProtocolError,
     KepcoOnSessionExpired,
@@ -195,7 +196,7 @@ async def test_login_bootstraps_browser_session_before_sending_credentials() -> 
         assert request.path == "/MYM001D00"
         assert "text/html" in request.headers["Accept"]
         assert request.headers["Referer"] == "https://online.kepco.co.kr/"
-        assert request.headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.4.4"
+        assert request.headers["User-Agent"] == "HomeAssistant-KEPCO-ON/0.4.5"
         assert "submissionid" not in request.headers
         assert "refreshToken" not in request.headers
         return html_response()
@@ -1039,3 +1040,39 @@ async def test_sso_store_failure_preserves_old_session_and_generation() -> None:
             await auth.async_sso_check()
         assert auth.current_session == old_session
         assert auth._generation == generation
+
+
+@pytest.mark.asyncio
+async def test_login_rejected_as_login_page_is_access_blocked_not_reauth() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/cyb/me/login/indi/api",
+        "post",
+        response=Response(
+            text=f"<html><form>login {PASSWORD_SECRET}</form></html>",
+            content_type="text/html",
+        ),
+    )
+    async with auth_context(server, MemorySessionStore()) as auth:
+        with pytest.raises(KepcoOnAccessBlocked) as raised:
+            await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+        assert not isinstance(raised.value, KepcoOnAuthError)
+        assert_no_secret(str(raised.value))
+
+
+@pytest.mark.asyncio
+async def test_login_result_no_reports_short_error_code_only() -> None:
+    server = ResponsesMockServer()
+    server.add(
+        HOST,
+        "/cyb/me/login/indi/api",
+        "post",
+        response=json_response(
+            {"dma_loginData2": {"result": "NO", "errorCode": "E1001", "errorMessage": "x"}}
+        ),
+    )
+    async with auth_context(server, MemorySessionStore()) as auth:
+        with pytest.raises(KepcoOnAuthError) as raised:
+            await auth.async_login(USERNAME_SECRET, PASSWORD_SECRET)
+        assert "errorCode=E1001" in str(raised.value)

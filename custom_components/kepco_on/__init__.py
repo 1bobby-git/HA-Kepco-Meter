@@ -28,6 +28,7 @@ from .const import (
 )
 from .coordinator import KepcoOnDataUpdateCoordinator
 from .exceptions import (
+    KepcoOnAccessBlocked,
     KepcoOnAuthError,
     KepcoOnConnectionError,
     KepcoOnNoCustomersError,
@@ -230,6 +231,8 @@ def _map_setup_error(err: Exception) -> Exception:
         return err
     if isinstance(err, UpdateFailed):
         return ConfigEntryNotReady("KEPCO ON first refresh failed")
+    if isinstance(err, KepcoOnAccessBlocked):
+        return ConfigEntryNotReady("KEPCO ON blocked the automated request (web protection)")
     if isinstance(err, KepcoOnAuthError):
         return ConfigEntryAuthFailed("KEPCO ON authentication failed")
     if isinstance(err, KepcoOnRateLimitError | KepcoOnConnectionError):
@@ -283,11 +286,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
 
     if setup_error is not None:
         _LOGGER.error(
-            "KEPCO ON setup failed during %s (%s)",
+            "KEPCO ON setup failed during %s (%s): %s",
             setup_phase,
             type(setup_error).__name__,
+            # Only transport-built exceptions carry fixed, secret-free text plus a
+            # response shape (status, content type, body kind); log nothing else.
+            setup_error
+            if isinstance(setup_error, KepcoOnAccessBlocked | KepcoOnSessionExpired)
+            else "-",
         )
-        if isinstance(setup_error, KepcoOnUnsupportedAccount):
+        if isinstance(setup_error, KepcoOnAccessBlocked):
+            async_create_issue(hass, entry, "access_blocked")
+        elif isinstance(setup_error, KepcoOnUnsupportedAccount):
             async_create_issue(hass, entry, "unsupported_account")
         elif isinstance(setup_error, KepcoOnProtocolError):
             if setup_phase in {"authenticate", "account"}:
@@ -305,6 +315,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: KepcoOnConfigEntry) -> b
         raise mapped from None
 
     for kind in (
+        "access_blocked",
         "login_schema_changed",
         "customer_schema_changed",
         "unsupported_account",

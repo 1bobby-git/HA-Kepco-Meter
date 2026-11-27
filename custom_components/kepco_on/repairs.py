@@ -12,6 +12,7 @@ from homeassistant.helpers.issue_registry import IssueSeverity
 from .const import DOMAIN
 
 type KepcoOnRepairIssueKind = Literal[
+    "access_blocked",
     "login_schema_changed",
     "customer_schema_changed",
     "bill_schema_changed",
@@ -20,6 +21,7 @@ type KepcoOnRepairIssueKind = Literal[
 ]
 
 ISSUE_SEVERITIES: dict[KepcoOnRepairIssueKind, IssueSeverity] = {
+    "access_blocked": IssueSeverity.ERROR,
     "login_schema_changed": IssueSeverity.ERROR,
     "customer_schema_changed": IssueSeverity.ERROR,
     "bill_schema_changed": IssueSeverity.WARNING,

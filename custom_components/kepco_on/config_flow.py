@@ -42,6 +42,7 @@ from .const import (
     POLLING_INTERVAL_HOURS,
 )
 from .exceptions import (
+    KepcoOnAccessBlocked,
     KepcoOnAuthError,
     KepcoOnConnectionError,
     KepcoOnMfaRequired,
@@ -203,6 +204,8 @@ def _map_error(err: Exception, *, stage: str | None = None) -> str:
         return "invalid_auth"
     if isinstance(err, KepcoOnRateLimitError):
         return "rate_limited"
+    if isinstance(err, KepcoOnAccessBlocked):
+        return "access_blocked"
     if isinstance(err, KepcoOnConnectionError):
         return "cannot_connect"
     if isinstance(err, KepcoOnUnsupportedAccount):
